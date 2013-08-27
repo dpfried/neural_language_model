@@ -5,9 +5,12 @@ import numpy as np
 # code adapted from DeepLearning tutorial:
 # deeplearning.net/tutorial/mlp.html
 
-class Embedding(object):
-    def __init__(self, rng, vocab_size, dimensions, initial_embedding_range=0.01):
+class EmbeddingLayer(object):
+    def __init__(self, rng, vocab_size, dimensions, sequence_length, initial_embedding_range=0.01):
         """ Initialize the parameters of the embedding layer
+
+        :type rng: nympy.random.RandomState
+        :param rng: a random number generator used to initialize weights
 
         :type vocab_size: int
         :param vocab_size: the number of discrete items to be embedded
@@ -17,7 +20,41 @@ class Embedding(object):
         :param dimensions: the number of dimensions in the distributed
         representation.
         """
-        self.embedding = theano.shared(value=np.((
+
+        self.rng = rng
+        self.vocab_size = vocab_size
+        self.dimensions = dimensions
+
+        initial_embedding = np.asarray(rng.uniform(
+            low=-initial_embedding_range / 2.,
+            high=initial_embedding_range / 2.,
+            size=(self.vocab_size, self.dimensions)),
+            dtype=theano.config.floatX)
+
+        self.embedding = theano.shared(value=initial_embedding, name='embedding')
+        self.sequence_length = sequence_length
+
+        # params are those that should be updated in gradient descent and
+        # are also serialized
+        self.params = [self.embedding]
+
+        # hyperparams are those that we'd serialize but aren't optimized in
+        # gradient descent
+        self.hyper_params = [self.vocab_size, self.dimensions, self.sequence_length]
+
+        # symbolizes a matrix (seq length x vocabulary size) that is the one-hot encoding
+        # of the input sequence
+        self.one_hot_input = T.matrix(name='one_hot_input')
+
+        self.output = T.flatten(T.dot(self.one_hot_input, self.embedding))
+
+    def one_hot_from_symbols(self, symbol_indices):
+        """returns a matrix of dimensions sequence_length x vocabulary_size that
+        has a 1 in r,c if word_r is symbol_c, and 0 otherwise"""
+        # todo: make A sparse??
+        A = np.zeros((len(symbol_indices), self.vocab_size))
+        A[range(len(symbol_indices)), symbol_indices] = 1
+        return A
 
 class LogisticRegression(object):
     def __init__(self, input, n_in, n_out):
@@ -52,6 +89,8 @@ class LogisticRegression(object):
         self.y_pred = T.argmax(self.p_y_given_x, axis=1)
 
         self.params = [self.W, self.b]
+
+        self.hyper_params = [self.n_in, self.n_out]
 
     def negative_log_likelihood(self, y):
         """Return the mean of the negative log-likelihood of the prediction
@@ -155,41 +194,29 @@ class HiddenLayer(object):
         # parameters of the model
         self.params = [self.W, self.b]
 
-class MLP(object):
-    """Multi-Layer Perceptron Class
-
-    A multilayer perceptron is a feedforward artificial neural network model
-    that has one Layer or more of hidden units and nonlinear activations.
-    Intermediate Layers usually have as activation function tanh or the
-    sigmoid function (defined here by a ``HiddenLayer`` class) while the
-    top Layer is a softmax Layer (defined here by a ``LogisticRegression``
-    class).
+class NLM(object):
+    """
     """
 
-    def __init__(self, rng, input, n_in, n_hidden, n_out):
-        """Initialize the params for the multilayer perceptron
+    def __init__(self, rng, vocab_size, dimensions, sequence_length, n_hidden, n_out):
+        self.rng = rng
+        self.vocab_size = vocab_size
+        self.dimensions = dimensions
+        self.sequence_length = sequence_length
+        self.n_hidden = n_hidden
+        self.n_out = n_out
 
-        :type rng: np.random.RandomState
-        :param rng: a random number generator used to initialize weights
+        self.embedding_layer = EmbeddingLayer(rng,
+                                              vocab_size=vocab_size,
+                                              dimensions=dimensions,
+                                              sequence_length=sequence_length)
 
-        :type input: theano.tensor.TensorType
-        :param input: symbolic variable that describes the input of the
-        architecture (one minibatch)
-
-        :type n_in: int
-        :param n_in: number of input units, the dimension of the space in
-        which the datapoints lie
-
-        :type n_hidden: int
-        :param n_hidden: number of hidden units
-
-        :type n_out: int
-        :param n_out: number of output units, the dimension of the space in which
-        the labels lie
-        """
-
-        self.hidden_layer = HiddenLayer(rng=rng, input=input, n_in=n_in, n_out=n_hidden,
+        self.hidden_layer = HiddenLayer(rng=rng,
+                                        input=self.embedding_layer.output,
+                                        n_in=dimensions * sequence_length,
+                                        n_out=n_hidden,
                                         activation=T.tanh)
+
         self.log_regression_layer = LogisticRegression(input=self.hidden_layer.output,
                                                        n_in=n_hidden,
                                                        n_out=n_out)
@@ -209,4 +236,4 @@ class MLP(object):
 
         # the params of the model are the parameters of the two layers it is
         # made of
-        self.params = self.hidden_layer.params + self.log_regression_layer.params
+        self.params = self.embedding_layer.params + self.hidden_layer.params + self.log_regression_layer.params

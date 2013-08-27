@@ -1,75 +1,9 @@
 import theano
 import theano.tensor as T
 import numpy as np
-import scipy
 
 # code adapted from DeepLearning tutorial:
 # deeplearning.net/tutorial/mlp.html
-
-class EmbeddingLayer(object):
-    def __init__(self, rng, input, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01):
-        """ Initialize the parameters of the embedding layer
-
-        :type rng: nympy.random.RandomState
-        :param rng: a random number generator used to initialize weights
-
-        :type input: a theano.tensor.dmatrix
-        :param input: a symbolic tensor of shape (n_examples, dimensions * sequence_length) (instantiated
-        values can be produced by one_hot_from_batch)
-
-        :type vocab_size: int
-        :param vocab_size: the number of discrete items to be embedded
-        in the distributed representation
-
-        :type dimensions: int
-        :param dimensions: the number of dimensions in the distributed
-        representation.
-
-        :type sequence_length: int
-        :param sequence_length: the number of words in each n-gram
-        """
-
-        self.rng = rng
-        self.vocab_size = vocab_size
-        self.dimensions = dimensions
-
-        initial_embedding = np.asarray(rng.uniform(
-            low=-initial_embedding_range / 2.,
-            high=initial_embedding_range / 2.,
-            size=(self.vocab_size, self.dimensions)),
-            dtype=theano.config.floatX)
-
-        self.embedding = theano.shared(value=initial_embedding, name='embedding')
-        self.sequence_length = sequence_length
-
-        # params are those that should be updated in gradient descent and
-        # are also serialized
-        self.params = [self.embedding]
-
-        # hyperparams are those that we'd serialize but aren't optimized in
-        # gradient descent
-        self.hyper_params = [self.vocab_size, self.dimensions, self.sequence_length]
-
-        # memoize to use in one_hot_from_batch for lookup of one-hot encodings
-        self.vocab_id = scipy.sparse.eye(vocab_size, vocab_size).tocsr()
-
-        # symbolizes a matrix (seq length x vocabulary size) that is the one-hot encoding
-        # of the input sequence
-        self.one_hot_input = T.matrix(name='one_hot_input')
-
-        # output: a batch_size x (dimension * sequence_length) matrix
-        # each row corresponds to the concatenated vectors of the
-        # representations of the words in that n-gram (where n =
-        # sequence_length)
-        self.output = T.flatten(T.dot(self.one_hot_input, self.embedding), outdim=2)
-
-    def one_hot_from_batch(self, batch_of_symbol_sequences):
-        return np.array(self.one_hot_from_symbols(sequence) for sequence in batch_of_symbol_sequences)
-
-    def one_hot_from_symbols(self, symbol_indices):
-        """returns a matrix of dimensions sequence_length x vocabulary_size that
-        has a 1 in r,c if word_r is symbol_c, and 0 otherwise"""
-        return self.vocab_id[symbol_indices].todense()
 
 class LogisticRegression(object):
     def __init__(self, input, n_in, n_out):
@@ -209,26 +143,18 @@ class HiddenLayer(object):
         # parameters of the model
         self.params = [self.W, self.b]
 
-class NLM(object):
+class MLP(object):
     """
     """
 
-    def __init__(self, rng, vocab_size, dimensions, sequence_length, n_hidden, n_out):
+    def __init__(self, rng, input, n_in, n_hidden, n_out):
         self.rng = rng
-        self.vocab_size = vocab_size
-        self.dimensions = dimensions
-        self.sequence_length = sequence_length
         self.n_hidden = n_hidden
         self.n_out = n_out
 
-        self.embedding_layer = EmbeddingLayer(rng,
-                                              vocab_size=vocab_size,
-                                              dimensions=dimensions,
-                                              sequence_length=sequence_length)
-
         self.hidden_layer = HiddenLayer(rng=rng,
-                                        input=self.embedding_layer.output,
-                                        n_in=dimensions * sequence_length,
+                                        input=input,
+                                        n_in=n_in,
                                         n_out=n_hidden,
                                         activation=T.tanh)
 
@@ -251,8 +177,4 @@ class NLM(object):
 
         # the params of the model are the parameters of the two layers it is
         # made of
-        self.params = self.embedding_layer.params + self.hidden_layer.params + self.log_regression_layer.params
-
-        self.one_hot_from_batch = self.embedding_layer.one_hot_from_batch
-
-        self.one_hot_input = self.embedding_layer.one_hot_input
+        self.params = self.hidden_layer.params + self.log_regression_layer.params

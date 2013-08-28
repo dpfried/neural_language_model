@@ -99,17 +99,11 @@ class LogisticRegression(object):
         self.b = theano.shared(value=0., name='b')
 
         # compute vector of class-membership probabilities in symbolic form
-        print 'input ndim', input.ndim
-        print 'W ndim', self.W.ndim
-        print 'dot ndim', T.dot(input, self.W).ndim
-        print 'b ndim', self.b.ndim
-        print 'lin comb dim', (T.dot(input, self.W) + self.b).ndim
         self.p_y_given_x = T.flatten(T.nnet.softmax(T.dot(input, self.W) + self.b))
 
         # compute prediction as a class whose probability is maximal in the
         # symbolic form
         self.y_pred = T.argmax(self.p_y_given_x)
-        print 'y_pred ndim', self.y_pred.ndim
 
         self.params = [self.W, self.b]
 

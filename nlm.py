@@ -4,6 +4,7 @@ import numpy as np
 from model import NLM
 import cPickle
 import time
+import sys
 
 def get_data():
     return # [(train_X, train_Y), (test_X, test_Y)]
@@ -24,7 +25,7 @@ def fake_data():
 
     return train, test
 
-def test_nlm(vocab_size, dimensions, n_hidden, data, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, n_epochs=1000, batch_size=20, save_model_fname=None, epochs=np.inf):
+def test_nlm(vocab_size, dimensions, n_hidden, data, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, n_epochs=1000, batch_size=20, save_model_basename=None, epochs=np.inf):
     print '... building the model'
 
     ( train_set_x, train_set_y ), ( test_set_x, test_set_y ) = data
@@ -48,8 +49,8 @@ def test_nlm(vocab_size, dimensions, n_hidden, data, rng=None, learning_rate=0.0
     test_model = theano.function(inputs=[classifier.one_hot_input, y],
                                  outputs=classifier.errors(y))
 
-    predict_model = theano.function(inputs=[classifier.one_hot_input],
-                                    outputs=classifier.log_regression_layer.y_pred)
+    # predict_model = theano.function(inputs=[classifier.one_hot_input],
+    #                                 outputs=classifier.log_regression_layer.y_pred)
 
     # validate_model = theano.function(inputs=[classifier.one_hot_input],
     #                                  outputs=classifier.errors(y))
@@ -62,8 +63,8 @@ def test_nlm(vocab_size, dimensions, n_hidden, data, rng=None, learning_rate=0.0
                                   outputs=cost,
                                   updates=updates)
 
-    predict_probs = theano.function(inputs=[classifier.one_hot_input],
-                                    outputs=classifier.log_regression_layer.p_y_given_x)
+    # predict_probs = theano.function(inputs=[classifier.one_hot_input],
+    #                                 outputs=classifier.log_regression_layer.p_y_given_x)
 
     # get_minibatch = lambda data, batch_index: classifier.one_hot_from_batch(data[batch_index * batch_size : (batch_index + 1) * batch_size])
 
@@ -78,14 +79,24 @@ def test_nlm(vocab_size, dimensions, n_hidden, data, rng=None, learning_rate=0.0
     epoch = 0
     while epoch < epochs:
         epoch += 1
-        print 'epoch %i running...' % (epoch)
         # for minibatch_index in xrange(n_train_batches):
-        for train_index in xrange(n_train_instances):
-            train_model(classifier.one_hot_from_symbols(train_set_x[train_index]), train_set_y[train_index])
+        print_freq = 100
+        costs = []
+        # for stochastic gradient descent, feed each training example in random order
+        for count, train_index in enumerate(rng.permutation(n_train_instances)):
+            if count % print_freq == 0:
+                sys.stdout.write('\rtraining instance %d of %d (%f %%)\r' % (count, n_train_instances, 100. * count / n_train_instances))
+                sys.stdout.flush()
+            costs.append(train_model(classifier.one_hot_from_symbols(train_set_x[train_index]), train_set_y[train_index]))
 
-        test_losses = [test_model(classifier.one_hot_from_symbols(test_set_x[test_index]),
-                                  test_set_y[test_index])
-                       for test_index in xrange(n_test_instances)]
+        test_losses = []
+        for test_index in xrange(n_test_instances):
+            if test_index % print_freq == 0:
+                sys.stdout.write('\rtesting instance %d of %d (%f %%)\r' % (test_index, n_test_instances, 100. * test_index / n_test_instances))
+                sys.stdout.flush()
+            test_losses.append(test_model(classifier.one_hot_from_symbols(test_set_x[test_index]),
+                                          test_set_y[test_index]))
+        this_training_cost = np.mean(costs)
         this_test_loss = np.mean(test_losses)
 
         # print test_set_y[0:1000:50]
@@ -96,35 +107,46 @@ def test_nlm(vocab_size, dimensions, n_hidden, data, rng=None, learning_rate=0.0
         # print 'losses', test_losses[0:1000:50]
         # print 'losses max', np.max(test_losses)
 
-
         current_time = time.clock()
-        print 'epoch %i \t test error %f %% \t % %f seconds' % (epoch, this_test_loss * 100., current_time - last_time)
-        last_time = time
+        sys.stdout.write('\033[k\r')
+        sys.stdout.flush()
+        print 'epoch %i \t training cost %f %% \t test error %f %% \t %f seconds' % (epoch, this_training_cost, this_test_loss * 100., current_time - last_time)
+        last_time = current_time
 
-        if save_model_fname:
-            print 'dumping to file..'
-            with open(save_model_fname, 'wb') as f:
+        if save_model_basename:
+            sys.stdout.write('dumping to file..\r')
+            sys.stdout.flush()
+            with gzip.open('%s-%d.pkl.gz' % (save_model_basename, epoch), 'wb') as f:
                 cPickle.dump(classifier, f)
-            print 'dump complete'
+            sys.stdout.write('\033[k\r')
+            sys.stdout.flush()
 
     return classifier
 
 if __name__ == '__main__':
     import ngrams_reader
-    print 'loading n_grams...'
-    n_grams = ngrams_reader.NGramsContainer(ngrams_reader.DATA_BY_SIZE[0])
-    print 'dumping n_gram representation...'
     import gzip
-    with gzip.open('n_grams.pkl.gz', 'wb') as f:
-        cPickle.dump(n_grams)
+    print 'loading n_grams...'
+    with gzip.open('data/n_grams.pkl.gz', 'rb') as f:
+        n_grams = cPickle.load(f)
+    # n_grams = ngrams_reader.NGramsContainer(ngrams_reader.DATA_BY_SIZE[0], num_words=5000)
+    print 'read %i sentences, with %i word types. vocabulary is %i types' % (n_grams.n_examples, len(n_grams.frequency_counts), n_grams.vocab_size)
+    # print 'dumping n_gram representation...'
+    # with gzip.open('data/n_grams.pkl.gz', 'wb') as f:
+    #     cPickle.dump(n_grams, f)
+
     print 'extracting data...'
     rng = np.random.RandomState(1234)
-    data = n_grams.get_data(rng)
+    data = n_grams.get_data(rng=rng, train_proportion=0.1, test_proportion=0.05)
     print 'constructing model...'
-    classifier = test_nlm(rng=rng,
-                          vocab_size=n_grams.vocab_size,
-                          dimensions=20,
-                          n_hidden=30,
-                          data=data,
-                          save_model_fname='model.pkl',
-                          epochs=np.inf)
+    params = {'rng':rng,
+              'vocab_size':n_grams.vocab_size,
+              'dimensions':20,
+              'n_hidden':30,
+              'L1_reg':0.0000,
+              'L2_reg':0.0000,
+              'save_model_basename':'data/small_20_30_l1_reg',
+              'epochs':np.inf}
+    print params
+    params['data'] = data
+    classifier = test_nlm(**params)

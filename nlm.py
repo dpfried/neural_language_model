@@ -3,6 +3,7 @@ import theano.tensor as T
 import numpy as np
 from model import NLM
 import cPickle
+import time
 
 def get_data():
     return # [(train_X, train_Y), (test_X, test_Y)]
@@ -23,7 +24,7 @@ def fake_data():
 
     return train, test
 
-def test_nlm(vocab_size, dimensions, n_hidden, data, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, n_epochs=1000, batch_size=20, save_model_fname=None, epochs=np.inf):
+def test_nlm(vocab_size, dimensions, n_hidden, data, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, n_epochs=1000, batch_size=20, save_model_fname=None, epochs=np.inf):
     print '... building the model'
 
     ( train_set_x, train_set_y ), ( test_set_x, test_set_y ) = data
@@ -32,7 +33,8 @@ def test_nlm(vocab_size, dimensions, n_hidden, data, learning_rate=0.01, L1_reg=
     n_test_instances, _ = test_set_x.shape
 
     y = T.iscalar('y')
-    rng = np.random.RandomState(1234)
+    if rng is None:
+        rng = np.random.RandomState(1234)
 
     classifier = NLM(rng, vocab_size, dimensions, sequence_length, n_hidden, 2)
 
@@ -65,16 +67,18 @@ def test_nlm(vocab_size, dimensions, n_hidden, data, learning_rate=0.01, L1_reg=
 
     # get_minibatch = lambda data, batch_index: classifier.one_hot_from_batch(data[batch_index * batch_size : (batch_index + 1) * batch_size])
 
-    print test_set_y[0:1000:50]
-    print [predict_probs(classifier.one_hot_from_symbols(test_set_x[test_index]))
-           for test_index in xrange(n_test_instances)][0:1000:50]
-    print [int(predict_model(classifier.one_hot_from_symbols(test_set_x[test_index])))
-           for test_index in xrange(n_test_instances)][0:1000:50]
+    # print test_set_y[0:1000:50]
+    # print [predict_probs(classifier.one_hot_from_symbols(test_set_x[test_index]))
+    #        for test_index in xrange(n_test_instances)][0:1000:50]
+    # print [int(predict_model(classifier.one_hot_from_symbols(test_set_x[test_index])))
+    #        for test_index in xrange(n_test_instances)][0:1000:50]
     print '... training'
 
+    last_time = time.clock()
     epoch = 0
     while epoch < epochs:
         epoch += 1
+        print 'epoch %i running...' % (epoch)
         # for minibatch_index in xrange(n_train_batches):
         for train_index in xrange(n_train_instances):
             train_model(classifier.one_hot_from_symbols(train_set_x[train_index]), train_set_y[train_index])
@@ -84,22 +88,43 @@ def test_nlm(vocab_size, dimensions, n_hidden, data, learning_rate=0.01, L1_reg=
                        for test_index in xrange(n_test_instances)]
         this_test_loss = np.mean(test_losses)
 
-        print test_set_y[0:1000:50]
-        print [predict_probs(classifier.one_hot_from_symbols(test_set_x[test_index]))
-               for test_index in xrange(n_test_instances)][0:1000:50]
-        print [int(predict_model(classifier.one_hot_from_symbols(test_set_x[test_index])))
-               for test_index in xrange(n_test_instances)][0:1000:50]
-        print 'losses', test_losses[0:1000:50]
-        print 'losses max', np.max(test_losses)
+        # print test_set_y[0:1000:50]
+        # print [predict_probs(classifier.one_hot_from_symbols(test_set_x[test_index]))
+        #        for test_index in xrange(n_test_instances)][0:1000:50]
+        # print [int(predict_model(classifier.one_hot_from_symbols(test_set_x[test_index])))
+        #        for test_index in xrange(n_test_instances)][0:1000:50]
+        # print 'losses', test_losses[0:1000:50]
+        # print 'losses max', np.max(test_losses)
 
 
-        print 'epoch %i, test error %f %%' % (epoch, this_test_loss * 100.)
+        current_time = time.clock()
+        print 'epoch %i \t test error %f %% \t % %f seconds' % (epoch, this_test_loss * 100., current_time - last_time)
+        last_time = time
 
         if save_model_fname:
+            print 'dumping to file..'
             with open(save_model_fname, 'wb') as f:
                 cPickle.dump(classifier, f)
+            print 'dump complete'
 
     return classifier
 
 if __name__ == '__main__':
-    classifier = test_nlm(vocab_size=10, dimensions=5, n_hidden=10, data=fake_data(), save_model_fname='model.pkl', epochs=10)
+    import ngrams_reader
+    print 'loading n_grams...'
+    n_grams = ngrams_reader.NGramsContainer(ngrams_reader.DATA_BY_SIZE[0])
+    print 'dumping n_gram representation...'
+    import gzip
+    with gzip.open('n_grams.pkl.gz', 'wb') as f:
+        cPickle.dump(n_grams)
+    print 'extracting data...'
+    rng = np.random.RandomState(1234)
+    data = n_grams.get_data(rng)
+    print 'constructing model...'
+    classifier = test_nlm(rng=rng,
+                          vocab_size=n_grams.vocab_size,
+                          dimensions=20,
+                          n_hidden=30,
+                          data=data,
+                          save_model_fname='model.pkl',
+                          epochs=np.inf)

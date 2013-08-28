@@ -2,26 +2,39 @@ import theano
 import theano.tensor as T
 import numpy as np
 from model import NLM
-import time
-import sys
-import os
+import cPickle
 
 def get_data():
     return # [(train_X, train_Y), (test_X, test_Y)]
 
-def test_mlp(vocab_size, dimensions, n_hidden, sequence_length=5, n_out=1, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000, batch_size=20):
+def fake_data():
+    summands = np.random.randint(10, size=(1000, 3))
+    positive = summands * 2
+    negative = positive + 1
+
+    positive[:,1] = np.random.randint(10, size=(1000,))
+    negative[:,1] = np.random.randint(10, size=(1000,))
+
+    positive = np.mod(positive, 10)
+    negative = np.mod(negative, 10)
+
+    train = np.vstack([negative[:900], positive[:900]]) , np.hstack([np.array([0] * 900, dtype=np.int32), np.array([1] * 900, dtype=np.int32)])
+    test = np.vstack([negative[900:], positive[900:]]) , np.hstack([np.array([0] * 100, dtype=np.int32), np.array([1] * 100, dtype=np.int32)])
+
+    return train, test
+
+def test_nlm(vocab_size, dimensions, n_hidden, data, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, n_epochs=1000, batch_size=20, save_model_fname=None, epochs=np.inf):
     print '... building the model'
 
-    train_set_x, train_set_y, test_set_x, test_set_y = get_data()
+    ( train_set_x, train_set_y ), ( test_set_x, test_set_y ) = data
 
-    n_train_batches = train_set_x.shape[0] / batch_size
-    n_test_batches = test_set_x.shape[0] / batch_size
+    n_train_instances, sequence_length = train_set_x.shape
+    n_test_instances, _ = test_set_x.shape
 
-    y = T.ivector('y') # labvels presented as a 1D vector of [int] labels
+    y = T.iscalar('y')
     rng = np.random.RandomState(1234)
 
-    # construct the MLP class
-    classifier = NLM(rng, vocab_size, dimensions, sequence_length, n_hidden, n_out)
+    classifier = NLM(rng, vocab_size, dimensions, sequence_length, n_hidden, 2)
 
     # the cost we minimize during training is the negative log likelihood of
     # the model plus the regularization terms; cost is expressed here
@@ -32,6 +45,9 @@ def test_mlp(vocab_size, dimensions, n_hidden, sequence_length=5, n_out=1, learn
     # the model on a minibatch
     test_model = theano.function(inputs=[classifier.one_hot_input, y],
                                  outputs=classifier.errors(y))
+
+    predict_model = theano.function(inputs=[classifier.one_hot_input],
+                                    outputs=classifier.log_regression_layer.y_pred)
 
     # validate_model = theano.function(inputs=[classifier.one_hot_input],
     #                                  outputs=classifier.errors(y))
@@ -44,71 +60,46 @@ def test_mlp(vocab_size, dimensions, n_hidden, sequence_length=5, n_out=1, learn
                                   outputs=cost,
                                   updates=updates)
 
+    predict_probs = theano.function(inputs=[classifier.one_hot_input],
+                                    outputs=classifier.log_regression_layer.p_y_given_x)
 
+    # get_minibatch = lambda data, batch_index: classifier.one_hot_from_batch(data[batch_index * batch_size : (batch_index + 1) * batch_size])
+
+    print test_set_y[0:1000:50]
+    print [predict_probs(classifier.one_hot_from_symbols(test_set_x[test_index]))
+           for test_index in xrange(n_test_instances)][0:1000:50]
+    print [int(predict_model(classifier.one_hot_from_symbols(test_set_x[test_index])))
+           for test_index in xrange(n_test_instances)][0:1000:50]
     print '... training'
 
-    # early-stopping parameters
-    patience = 10000 # look at this many examples regardless
-    patience_increase = 2 # wait this much longer when a new best is found
-    improvement_threshold = 0.995 # a relative importance of this much is considered significant
-
-    # go through this many minibatches before checking the network on the
-    # validation set; in this case we check every epoch
-    validation_frequency = min(n_train_batches, patience / 2)
-
-    best_params = None
-    best_validation_loss = np.inf
-    best_iter = 0
-    test_score = 0.
-    start_time = time.clock()
-
     epoch = 0
-    done_looping = False
-    while (epoch < n_epochs) and (not done_looping):
+    while epoch < epochs:
         epoch += 1
-        for minibatch_index in xrange(n_train_batches):
-            minibatch_avg_cost = train_model(minibatch_index)
+        # for minibatch_index in xrange(n_train_batches):
+        for train_index in xrange(n_train_instances):
+            train_model(classifier.one_hot_from_symbols(train_set_x[train_index]), train_set_y[train_index])
 
-            # iteration number
-            iter = (epoch - 1) * n_train_batches + minibatch_index
+        test_losses = [test_model(classifier.one_hot_from_symbols(test_set_x[test_index]),
+                                  test_set_y[test_index])
+                       for test_index in xrange(n_test_instances)]
+        this_test_loss = np.mean(test_losses)
 
-            if (iter + 1) % validation_frequency == 0:
-                # compute zero-one loss on validation set
-                validation_losses = [validate_model(i) for i
-                                     in xrange(n_valid_batches)]
-                this_validation_loss = np.mean(validation_losses)
+        print test_set_y[0:1000:50]
+        print [predict_probs(classifier.one_hot_from_symbols(test_set_x[test_index]))
+               for test_index in xrange(n_test_instances)][0:1000:50]
+        print [int(predict_model(classifier.one_hot_from_symbols(test_set_x[test_index])))
+               for test_index in xrange(n_test_instances)][0:1000:50]
+        print 'losses', test_losses[0:1000:50]
+        print 'losses max', np.max(test_losses)
 
-                print 'epoch %i, minibatch %i/%i, validation error %f %%' % (
-                    epoch, minibatch_index + 1, n_train_batches,
-                    this_validation_loss * 100.)
 
-                # if we got the best validation score until now
-                if this_validation_loss < best_validation_loss:
-                    # improve patience if loss improvement is good enough
-                    if this_validation_loss < best_validation_loss * improvement_threshold:
-                        patience = max(patience, iter * patience_increase)
+        print 'epoch %i, test error %f %%' % (epoch, this_test_loss * 100.)
 
-                        best_validation_loss = this_validation_loss
-                        best_iter = iter
+        if save_model_fname:
+            with open(save_model_fname, 'wb') as f:
+                cPickle.dump(classifier, f)
 
-                        # test it on the test set
-                        test_losses = [test_model(i) for i
-                                       in xrange(n_test_batches)]
-                        test_score = np.mean(test_losses)
-
-                        print '\tepoch %i, minibatch %i/%i, test error of best model %f %%' % (
-                            epoch, minibatch_index + 1, n_train_batches, test_score * 100.
-                        )
-
-                if patience <= iter:
-                    done_looping = True
-                    break
-
-    end_time = time.clock()
-    print 'Optimization complete. Best validation score of %f %% obtained at iteration %i, w/ test perf of\
-    %f %%' % (best_validation_loss * 100., best_iter + 1, test_score * 100.)
-
-    print >> sys.stderr, 'The code for file %s ran for %.2fm' % (os.path.split(__file__)[1], (end_time - start_time) / 60.)
+    return classifier
 
 if __name__ == '__main__':
-    test_mlp()
+    classifier = test_nlm(vocab_size=10, dimensions=5, n_hidden=10, data=fake_data(), save_model_fname='model.pkl', epochs=10)

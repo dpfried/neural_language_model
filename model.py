@@ -7,15 +7,11 @@ import scipy
 # deeplearning.net/tutorial/mlp.html
 
 class EmbeddingLayer(object):
-    def __init__(self, rng, input, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01):
+    def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01):
         """ Initialize the parameters of the embedding layer
 
         :type rng: nympy.random.RandomState
         :param rng: a random number generator used to initialize weights
-
-        :type input: a theano.tensor.dmatrix
-        :param input: a symbolic tensor of shape (n_examples, dimensions * sequence_length) (instantiated
-        values can be produced by one_hot_from_batch)
 
         :type vocab_size: int
         :param vocab_size: the number of discrete items to be embedded
@@ -29,9 +25,9 @@ class EmbeddingLayer(object):
         :param sequence_length: the number of words in each n-gram
         """
 
-        self.rng = rng
         self.vocab_size = vocab_size
         self.dimensions = dimensions
+        self.sequence_length = sequence_length
 
         initial_embedding = np.asarray(rng.uniform(
             low=-initial_embedding_range / 2.,
@@ -40,7 +36,7 @@ class EmbeddingLayer(object):
             dtype=theano.config.floatX)
 
         self.embedding = theano.shared(value=initial_embedding, name='embedding')
-        self.sequence_length = sequence_length
+        # self.embedding = theano.shared(value=np.eye(vocab_size, dimensions), name='embedding')
 
         # params are those that should be updated in gradient descent and
         # are also serialized
@@ -61,10 +57,13 @@ class EmbeddingLayer(object):
         # each row corresponds to the concatenated vectors of the
         # representations of the words in that n-gram (where n =
         # sequence_length)
-        self.output = T.flatten(T.dot(self.one_hot_input, self.embedding), outdim=2)
+        # self.output = T.flatten(T.dot(self.one_hot_input, self.embedding), outdim=2)
 
-    def one_hot_from_batch(self, batch_of_symbol_sequences):
-        return np.array(self.one_hot_from_symbols(sequence) for sequence in batch_of_symbol_sequences)
+        self.output = T.flatten(T.dot(self.one_hot_input, self.embedding))
+
+    # def one_hot_from_batch(self, batch_of_symbol_sequences):
+    #     return np.array([self.one_hot_from_symbols(sequence)
+    #                      for sequence in batch_of_symbol_sequences])
 
     def one_hot_from_symbols(self, symbol_indices):
         """returns a matrix of dimensions sequence_length x vocabulary_size that
@@ -88,20 +87,29 @@ class LogisticRegression(object):
                       which the target lies
         """
 
+        self.n_in = n_in
+        self.n_out = n_out
+
         # init the weights W as a matrix of zeros (n_in, n_out)
         self.W = theano.shared(value=np.zeros((n_in, n_out),
                                               dtype=theano.config.floatX), name='W')
 
         # init the basis as a vector of n_out 0s
-        self.b = theano.shared(value=np.zeros((n_out,),
-                                              dtype=theano.config.floatX), name='b')
+        # init the basis as a single scalar
+        self.b = theano.shared(value=0., name='b')
 
         # compute vector of class-membership probabilities in symbolic form
-        self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W) + self.b)
+        print 'input ndim', input.ndim
+        print 'W ndim', self.W.ndim
+        print 'dot ndim', T.dot(input, self.W).ndim
+        print 'b ndim', self.b.ndim
+        print 'lin comb dim', (T.dot(input, self.W) + self.b).ndim
+        self.p_y_given_x = T.flatten(T.nnet.softmax(T.dot(input, self.W) + self.b))
 
         # compute prediction as a class whose probability is maximal in the
         # symbolic form
-        self.y_pred = T.argmax(self.p_y_given_x, axis=1)
+        self.y_pred = T.argmax(self.p_y_given_x)
+        print 'y_pred ndim', self.y_pred.ndim
 
         self.params = [self.W, self.b]
 
@@ -134,7 +142,7 @@ class LogisticRegression(object):
         # LP[n-1,y[n-1]]] and T.mean(LP[T.arange(y.shape[0]),y]) is
         # the mean (across minibatch examples) of the elements in v,
         # i.e., the mean log-likelihood across the minibatch.
-        return -T.mean(T.log(self.p_y_given_x)[T.arange(y.shape[0]), y])
+        return -T.mean(T.log(self.p_y_given_x)[y])
 
     def errors(self, y):
         """Return a float representing the number of errors in the minibatch
@@ -154,7 +162,7 @@ class LogisticRegression(object):
         if y.dtype.startswith('int'):
             # the T.neq operator returns a vector of 0s and 1s, where 1
             # represents a mistake in prediction
-            return T.mean(T.neq(self.y_pred, y))
+            return T.neq(self.y_pred, y)
         else:
             raise NotImplementedError()
 
@@ -221,8 +229,7 @@ class NLM(object):
         self.n_hidden = n_hidden
         self.n_out = n_out
 
-        self.embedding_layer = EmbeddingLayer(rng,
-                                              vocab_size=vocab_size,
+        self.embedding_layer = EmbeddingLayer(rng, vocab_size=vocab_size,
                                               dimensions=dimensions,
                                               sequence_length=sequence_length)
 
@@ -242,17 +249,19 @@ class NLM(object):
         # square of L2 norm
         self.L2_sqr = (self.hidden_layer.W ** 2).sum() + (self.log_regression_layer.W ** 2).sum()
 
-        # negative log likelihood of the MLP is given by the negative log
-        # likelihood of the output of the model, computed in the logistic
-        # regression (output) layer
-        self.negative_log_likelihood = self.log_regression_layer.negative_log_likelihood
-        # same holds for the function computing the number of errors
-        self.errors = self.log_regression_layer.errors
 
         # the params of the model are the parameters of the two layers it is
         # made of
         self.params = self.embedding_layer.params + self.hidden_layer.params + self.log_regression_layer.params
-
-        self.one_hot_from_batch = self.embedding_layer.one_hot_from_batch
+        # self.params = self.hidden_layer.params + self.log_regression_layer.params
 
         self.one_hot_input = self.embedding_layer.one_hot_input
+
+    def errors(self, y):
+        return self.log_regression_layer.errors(y)
+
+    def one_hot_from_symbols(self, symbols):
+        return self.embedding_layer.one_hot_from_symbols(symbols)
+
+    def negative_log_likelihood(self, y):
+        return self.log_regression_layer.negative_log_likelihood(y)

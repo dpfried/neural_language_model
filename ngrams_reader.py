@@ -61,8 +61,28 @@ DATA_BY_SIZE = ['/cl/nldata/books_google_ngrams_eng/5gms/5gm-100.gz',
                 '/cl/nldata/books_google_ngrams_eng/5gms/5gm-1??.gz',
                 '/cl/nldata/books_google_ngrams_eng/5gms/5gm-*.gz']
 
+def add_noise_to_symbols(symbols, vocab_size, column_index=None, rng=None):
+    """symbols: a vector"""
+    seq_length = symbols.shape[0]
+
+    if rng is None:
+        rng = np.random
+
+    if column_index is None:
+        column_index = seq_length / 2
+
+    noisy = symbols.copy()
+    noisy[column_index] += rng.randint(1, vocab_size)
+    return np.mod(noisy, vocab_size)
+
 def add_noise_to_column(train_X, vocab_size, column_index=None, rng=None):
-    n_examples, seq_length = train_X.shape
+    train_X = np.array(train_X)
+    if train_X.ndim > 1:
+        n_examples, seq_length = train_X.shape
+    else:
+        n_examples, seq_length = 1, len(train_X)
+        # make this vector into the row of a one-row matrix
+        train_X = train_X[None, :]
     if rng is None:
         rng = np.random
 
@@ -98,7 +118,7 @@ class NGramsContainer(object):
     def average_sparsity(self):
         return (self.token_count_matrix[:, :-1] == 0).sum() / float(self.n_examples * self.n_gram_length)
 
-    def get_data(self, rng=None, train_proportion=0.95, test_proportion=None, nonsense_generator=add_noise_to_column):
+    def get_data(self, rng=None, train_proportion=0.95, test_proportion=None):
         if rng is not None:
             view = self.token_count_matrix[rng.permutation(self.n_examples)]
         else:
@@ -109,20 +129,6 @@ class NGramsContainer(object):
 
         num_train = int(train_proportion * self.n_examples)
         num_test = int(test_proportion * self.n_examples)
-        train, test = view[:num_train], view[-num_test:]
-
-        def make_examples(data_set):
-            # exclude the counts
-            positive = data_set[:, 0:-1]
-            # add noise to the good n-grams, producing negative training data
-            negative = nonsense_generator(positive, self.vocab_size, rng=rng)
-            N, M = positive.shape
-            # interleave the rows into a matrix, X
-            X = np.empty((N * 2, M))
-            X[::2,:] = positive
-            X[1::2,:] = negative
-            # positive class has label 1, negative has label 0
-            Y = np.array([1,0] * N)
-            return X, Y
-
-        return [make_examples(train), make_examples(test)]
+        # exclude the counts which are the last column
+        train, test = view[:num_train, :-1], view[-num_test:, :-1]
+        return train, test

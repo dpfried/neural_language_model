@@ -6,77 +6,52 @@ import cPickle
 import time
 import sys
 
-def get_data():
-    return # [(train_X, train_Y), (test_X, test_Y)]
-
-def fake_data():
-    summands = np.random.randint(10, size=(1000, 3))
-    positive = summands * 2
-    negative = positive + 1
-
-    positive[:,1] = np.random.randint(10, size=(1000,))
-    negative[:,1] = np.random.randint(10, size=(1000,))
-
-    positive = np.mod(positive, 10)
-    negative = np.mod(negative, 10)
-
-    train = np.vstack([negative[:900], positive[:900]]) , np.hstack([np.array([0] * 900, dtype=np.int32), np.array([1] * 900, dtype=np.int32)])
-    test = np.vstack([negative[900:], positive[900:]]) , np.hstack([np.array([0] * 100, dtype=np.int32), np.array([1] * 100, dtype=np.int32)])
-
-    return train, test
-
 def test_nlm(vocab_size, dimensions, n_hidden, data, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, n_epochs=1000, batch_size=20, save_model_basename=None, epochs=np.inf):
     print '... building the model'
 
-    ( train_set_x, train_set_y ), ( test_set_x, test_set_y ) = data
+    train_set_x, test_set_x = data
 
     n_train_instances, sequence_length = train_set_x.shape
     n_test_instances, _ = test_set_x.shape
 
-    y = T.iscalar('y')
     if rng is None:
         rng = np.random.RandomState(1234)
 
-    classifier = NLM(rng, vocab_size, dimensions, sequence_length, n_hidden, 2)
+    classifier = NLM(rng, vocab_size, dimensions, sequence_length, n_hidden)
 
-    # the cost we minimize during training is the negative log likelihood of
-    # the model plus the regularization terms; cost is expressed here
-    # symbolically
-    cost = classifier.negative_log_likelihood(y) + L1_reg * classifier.L1 + L2_reg * classifier.L2_sqr
+    # create symbolic variables for good and bad input
+    correct_input = T.matrix(name='correct_one_hot_input')
+    error_input = T.matrix(name='error_one_hot_input')
 
-    # compiling a Theano function that computes the mistakes that are made by
-    # the model on a minibatch
-    test_model = theano.function(inputs=[classifier.one_hot_input, y],
-                                 outputs=classifier.errors(y))
-
-    # predict_model = theano.function(inputs=[classifier.one_hot_input],
-    #                                 outputs=classifier.log_regression_layer.y_pred)
-
-    # validate_model = theano.function(inputs=[classifier.one_hot_input],
-    #                                  outputs=classifier.errors(y))
+    cost = classifier.cost(correct_input, error_input) + L1_reg * classifier.L1 + L2_reg * classifier.L2_sqr
 
     # update the params of the model using the gradients
     updates = [(param, param - learning_rate * T.grad(cost, param))
                for param in classifier.params]
 
-    train_model = theano.function(inputs=[classifier.one_hot_input, y],
+    train_model = theano.function(inputs=[correct_input, error_input],
                                   outputs=cost,
                                   updates=updates)
 
-    # predict_probs = theano.function(inputs=[classifier.one_hot_input],
-    #                                 outputs=classifier.log_regression_layer.p_y_given_x)
+    score_ngram = theano.function(inputs=[correct_input],
+                                  outputs=classifier.score(correct_input))
 
-    # get_minibatch = lambda data, batch_index: classifier.one_hot_from_batch(data[batch_index * batch_size : (batch_index + 1) * batch_size])
+    def rank_ngram_symbols(symbols, replacement_column = sequence_length / 2):
+        symbols = symbols.copy()
+        rank = 1
+        original_score = score_ngram(classifier.one_hot_from_symbols(symbols))
+        for offset in range(vocab_size):
+            symbols[replacement_column] += 1
+            symbols = np.mod(symbols, vocab_size)
+            if score_ngram(classifier.one_hot_from_symbols(symbols)) > original_score:
+                rank += 1
+        return rank
 
-    # print test_set_y[0:1000:50]
-    # print [predict_probs(classifier.one_hot_from_symbols(test_set_x[test_index]))
-    #        for test_index in xrange(n_test_instances)][0:1000:50]
-    # print [int(predict_model(classifier.one_hot_from_symbols(test_set_x[test_index])))
-    #        for test_index in xrange(n_test_instances)][0:1000:50]
     print '... training'
 
     last_time = time.clock()
     epoch = 0
+    epoch_test_frequency = 10
     while epoch < epochs:
         epoch += 1
         # for minibatch_index in xrange(n_train_batches):
@@ -87,30 +62,29 @@ def test_nlm(vocab_size, dimensions, n_hidden, data, rng=None, learning_rate=0.0
             if count % print_freq == 0:
                 sys.stdout.write('\rtraining instance %d of %d (%f %%)\r' % (count, n_train_instances, 100. * count / n_train_instances))
                 sys.stdout.flush()
-            costs.append(train_model(classifier.one_hot_from_symbols(train_set_x[train_index]), train_set_y[train_index]))
+            correct_symbols = train_set_x[train_index]
+            error_symbols = ngrams_reader.add_noise_to_symbols(correct_symbols, vocab_size, rng=rng)
+            costs.append(train_model(classifier.one_hot_from_symbols(correct_symbols),
+                                     classifier.one_hot_from_symbols(error_symbols)))
 
-        test_losses = []
-        for test_index in xrange(n_test_instances):
-            if test_index % print_freq == 0:
-                sys.stdout.write('\rtesting instance %d of %d (%f %%)\r' % (test_index, n_test_instances, 100. * test_index / n_test_instances))
-                sys.stdout.flush()
-            test_losses.append(test_model(classifier.one_hot_from_symbols(test_set_x[test_index]),
-                                          test_set_y[test_index]))
         this_training_cost = np.mean(costs)
-        this_test_loss = np.mean(test_losses)
 
-        # print test_set_y[0:1000:50]
-        # print [predict_probs(classifier.one_hot_from_symbols(test_set_x[test_index]))
-        #        for test_index in xrange(n_test_instances)][0:1000:50]
-        # print [int(predict_model(classifier.one_hot_from_symbols(test_set_x[test_index])))
-        #        for test_index in xrange(n_test_instances)][0:1000:50]
-        # print 'losses', test_losses[0:1000:50]
-        # print 'losses max', np.max(test_losses)
+        if epoch % epoch_test_frequency == 0:
+            test_ranks = []
+            for test_index in xrange(n_test_instances):
+                if test_index % (print_freq / 100) == 0:
+                    sys.stdout.write('\rtesting instance %d of %d (%f %%)\r' % (test_index, n_test_instances, 100. * test_index / n_test_instances))
+                    sys.stdout.flush()
+                test_ranks.append(rank_ngram_symbols(test_set_x[test_index]))
+            this_average_rank = np.mean(test_ranks)
+            this_average_rank_str = '%f' % this_average_rank
+        else:
+            this_average_rank_str = '--'
 
         current_time = time.clock()
         sys.stdout.write('\033[k\r')
         sys.stdout.flush()
-        print 'epoch %i \t training cost %f %% \t test error %f %% \t %f seconds' % (epoch, this_training_cost, this_test_loss * 100., current_time - last_time)
+        print 'epoch %i \t training cost %f %% \t test avg rank %s %% \t %f seconds' % (epoch, this_training_cost, this_average_rank_str, current_time - last_time)
         last_time = current_time
 
         if save_model_basename:
@@ -129,11 +103,11 @@ if __name__ == '__main__':
     print 'loading n_grams...'
     with gzip.open('data/n_grams.pkl.gz', 'rb') as f:
         n_grams = cPickle.load(f)
-    # n_grams = ngrams_reader.NGramsContainer(ngrams_reader.DATA_BY_SIZE[0], num_words=5000)
+    n_grams = ngrams_reader.NGramsContainer(ngrams_reader.DATA_BY_SIZE[0], num_words=5000)
     print 'read %i sentences, with %i word types. vocabulary is %i types' % (n_grams.n_examples, len(n_grams.frequency_counts), n_grams.vocab_size)
-    # print 'dumping n_gram representation...'
-    # with gzip.open('data/n_grams.pkl.gz', 'wb') as f:
-    #     cPickle.dump(n_grams, f)
+    print 'dumping n_gram representation...'
+    with gzip.open('data/n_grams_size0_data.pkl.gz', 'wb') as f:
+        cPickle.dump(n_grams, f)
 
     print 'extracting data...'
     rng = np.random.RandomState(1234)
@@ -145,7 +119,7 @@ if __name__ == '__main__':
               'n_hidden':30,
               'L1_reg':0.0000,
               'L2_reg':0.0000,
-              'save_model_basename':'data/small_20_30_l1_reg',
+              'save_model_basename':'data/rank/size0-0.1_20_30',
               'epochs':np.inf}
     print params
     params['data'] = data

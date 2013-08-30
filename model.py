@@ -1,7 +1,6 @@
 import theano
 import theano.tensor as T
 import numpy as np
-import scipy
 
 # code adapted from DeepLearning tutorial:
 # deeplearning.net/tutorial/mlp.html
@@ -35,31 +34,20 @@ class EmbeddingLayer(object):
             size=(self.vocab_size, self.dimensions)),
             dtype=theano.config.floatX)
 
-        self.embedding = theano.shared(value=initial_embedding, name='embedding')
+        self.embedding = initial_embedding
         # self.embedding = theano.shared(value=np.eye(vocab_size, dimensions), name='embedding')
 
-        # params are those that should be updated in gradient descent and
-        # are also serialized
-        self.params = [self.embedding]
+        self.params = []
 
-        # hyperparams are those that we'd serialize but aren't optimized in
-        # gradient descent
-        self.hyper_params = [self.vocab_size, self.dimensions, self.sequence_length]
+    def flatten_embeddings(self, embeddings):
+        """take a list of embedding vectors and put them into the appropriate format to feed to the next layer"""
+        return T.concatenate(embeddings)
 
-        # memoize to use in one_hot_from_batch for lookup of one-hot encodings
-        self.vocab_id = scipy.sparse.eye(vocab_size, vocab_size).tocsr()
+    def embeddings_from_symbols(self, symbol_indices):
+        return self.embedding[symbol_indices]
 
-    def apply(self, one_hot_input):
-        # output: a dimension x sequence_length matrix
-        # each row corresponds to the concatenated vectors of the
-        # representations of the words in that n-gram (where n =
-        # sequence_length)
-        return T.flatten(T.dot(one_hot_input, self.embedding))
-
-    def one_hot_from_symbols(self, symbol_indices):
-        """returns a matrix of dimensions sequence_length x vocabulary_size that
-        has a 1 in r,c if word_r is symbol_c, and 0 otherwise"""
-        return self.vocab_id[symbol_indices].todense()
+    def update_embeddings(self, symbol_indices, updates):
+        self.embedding[symbol_indices] += np.array(updates)
 
 class LinearScalarResponse(object):
     def __init__(self, n_in):
@@ -133,37 +121,96 @@ class HiddenLayer(object):
         return self.activation(T.dot(input, self.W) + self.b)
 
 class NLM(object):
-    def __init__(self, rng, vocab_size, dimensions, sequence_length, n_hidden):
+    def __init__(self, rng, vocab_size, dimensions, sequence_length, n_hidden, L1_reg, L2_reg, other_params={}):
+        # initialize parameters
         self.rng = rng
         self.vocab_size = vocab_size
         self.dimensions = dimensions
         self.sequence_length = sequence_length
         self.n_hidden = n_hidden
+        self.L1_reg = L1_reg
+        self.L2_reg = L2_reg
+        self.other_params = other_params
 
-        self.embedding_layer = EmbeddingLayer(rng, vocab_size=vocab_size,
-                                              dimensions=dimensions,
-                                              sequence_length=sequence_length)
+        self._build_layers()
+        self._build_functions()
 
-        self.hidden_layer = HiddenLayer(rng=rng,
-                                        n_in=dimensions * sequence_length,
-                                        n_out=n_hidden,
-                                        activation=T.tanh)
+    def _build_layers(self):
+        self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,
+                                              dimensions=self.dimensions,
+                                              sequence_length=self.sequence_length)
 
-        self.output_layer = LinearScalarResponse(n_in=n_hidden)
+        self.hidden_layer = HiddenLayer(rng=self.rng,
+                                        n_in=self.dimensions * self.sequence_length,
+                                        n_out=self.n_hidden,
+                                        activation=T.nnet.sigmoid)
 
-        self.layer_stack = [self.embedding_layer, self.hidden_layer, self.output_layer]
+        self.output_layer = LinearScalarResponse(n_in=self.n_hidden)
+
+        self.layer_stack = [self.hidden_layer, self.output_layer]
 
         self.L1 = abs(self.hidden_layer.W).sum() + abs(self.output_layer.W).sum()
 
         self.L2_sqr = (self.hidden_layer.W ** 2).sum() + (self.output_layer.W ** 2).sum()
 
-        self.params = self.embedding_layer.params + self.hidden_layer.params + self.output_layer.params
+        # connect the computation graph together from input to regularized cost
+        # function
 
-    def score(self, input):
-        return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, input)
+    def score_symbolic(self, sequence_embedding):
+        return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, sequence_embedding)
 
-    def cost(self, correct_input, error_input):
-        return T.clip(1 - self.score(correct_input) + self.score(error_input), 0, np.inf)
+    def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding):
+        return T.clip(1 - self.score_symbolic(correct_sequence_embedding) + self.score_symbolic(error_sequence_embedding), 0, np.inf)
 
-    def one_hot_from_symbols(self, symbols):
-        return self.embedding_layer.one_hot_from_symbols(symbols)
+    def _build_functions(self):
+        # create symbolic variables for correct and error input
+        correct_embeddings = [T.vector(name='correct_embedding%i' % i) for i in range(self.sequence_length)]
+        error_embeddings = [T.vector(name='error_embedding%i' % i) for i in range(self.sequence_length)]
+
+        correct_sequence_embedding = self.embedding_layer.flatten_embeddings(correct_embeddings)
+        error_sequence_embedding = self.embedding_layer.flatten_embeddings(error_embeddings)
+
+        cost = self.compare_symbolic(correct_sequence_embedding, error_sequence_embedding) + self.L1_reg * self.L1 + self.L2_reg * self.L2_sqr
+
+        weighted_learning_rate = T.scalar(name='weighted_learning_rate')
+
+        # update the params of the model using the gradients
+        updates = [(param, param - weighted_learning_rate * T.grad(cost, param))
+                   for param in self.hidden_layer.params + self.output_layer.params]
+
+        dcorrect_embeddings = T.grad(cost, correct_embeddings)
+        derror_embeddings = T.grad(cost, error_embeddings)
+
+        inputs = correct_embeddings + error_embeddings + [weighted_learning_rate]
+
+        self.training_function = theano.function(inputs=inputs,
+                                                 outputs=dcorrect_embeddings + derror_embeddings + [cost],
+                                                 updates=updates)
+
+        embeddings = [T.vector(name='embedding%i' % i) for i in range(self.sequence_length)]
+
+        self.score_ngram = theano.function(inputs=embeddings,
+                                           outputs=self.score_symbolic(self.embedding_layer.flatten_embeddings(embeddings)))
+
+    def train(self, correct_sequence, error_sequence, weighted_learning_rate=0.01):
+        correct_embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in correct_sequence]
+        error_embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in error_sequence]
+
+        outputs = self.training_function(*(correct_embeddings + error_embeddings + [weighted_learning_rate]))
+
+        correct_grads = outputs[:self.sequence_length]
+        error_grads = outputs[self.sequence_length:-1]
+
+        cost = outputs[-1]
+
+        correct_updates = -weighted_learning_rate * np.array(correct_grads)
+        error_updates = -weighted_learning_rate * np.array(error_grads)
+
+        self.embedding_layer.update_embeddings(correct_sequence, correct_updates)
+        self.embedding_layer.update_embeddings(error_sequence, error_updates)
+
+        return cost
+
+    def score(self, sequence):
+        embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in sequence]
+        return self.score_ngram(*embeddings)

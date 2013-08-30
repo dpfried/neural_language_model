@@ -72,32 +72,9 @@ def add_noise_to_symbols(symbols, vocab_size, column_index=None, rng=None):
         column_index = seq_length / 2
 
     noisy = symbols.copy()
-    noisy[column_index] += rng.randint(1, vocab_size)
-    return np.mod(noisy, vocab_size)
-
-def add_noise_to_column(train_X, vocab_size, column_index=None, rng=None):
-    train_X = np.array(train_X)
-    if train_X.ndim > 1:
-        n_examples, seq_length = train_X.shape
-    else:
-        n_examples, seq_length = 1, len(train_X)
-        # make this vector into the row of a one-row matrix
-        train_X = train_X[None, :]
-    if rng is None:
-        rng = np.random
-
-    if column_index is None:
-        column_index = seq_length / 2
-
-    # replace the word in column_index with a different word by adding a
-    # random offset to it, modulo the size of the vocabulary
-    noise_to_add = rng.randint(1, vocab_size, size=n_examples).astype(DTYPE)
-    noisy_column = np.mod(train_X[:, column_index] + noise_to_add, vocab_size)
-
-    # substitute this column back into the data matrix by appending the columns
-    # together.
-    # TODO: Does this mean memory is shared?
-    return np.column_stack([train_X[:, : column_index], noisy_column, train_X[:, column_index + 1 :]])
+    noisy_mod = (noisy[column_index] + rng.randint(1, vocab_size)) % vocab_size
+    noisy[column_index] = noisy_mod
+    return noisy
 
 class NGramsContainer(object):
     def __init__(self, glob_path, num_words=None):
@@ -129,6 +106,5 @@ class NGramsContainer(object):
 
         num_train = int(train_proportion * self.n_examples)
         num_test = int(test_proportion * self.n_examples)
-        # exclude the counts which are the last column
-        train, test = view[:num_train, :-1], view[-num_test:, :-1]
+        train, test = view[:num_train], view[-num_test:]
         return train, test

@@ -120,7 +120,7 @@ if __name__ == '__main__':
     if args.write_ngrams:
         print 'dumping n_grams to %s...' % args.write_ngrams
         with gzip.open(args.write_ngrams, 'wb') as f:
-            cPickle.dump(n_grams, f)
+            cPickle.dump(n_grams, f, protocol=2)
 
     print 'extracting data...'
     rng = np.random.RandomState(args.rng_seed)

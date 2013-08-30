@@ -11,7 +11,7 @@ def load_zipped_pickle(pickle_fname):
 def make_query_fn(classifier_path, n_gram_path='data/n_grams.pkl.gz'):
     n_grams = load_zipped_pickle(n_gram_path)
     classifier = load_zipped_pickle(classifier_path)
-    embeddings = classifier.embedding_layer.embedding.get_value()
+    embeddings = classifier.embedding_layer.embedding
     dist_matrix = squareform(pdist(embeddings, 'euclidean'))
     id_map = n_grams.id_map
     reverse_map = dict((value, key) for (key, value) in id_map.items())

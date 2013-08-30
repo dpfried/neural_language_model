@@ -100,7 +100,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_hidden', type=int, help="number of hidden nodes", default=30)
     parser.add_argument('--L1_reg', type=float, help="L1 regularization constant", default=0.0)
     parser.add_argument('--L2_reg', type=float, help="L2 regularization constant", default=0.0)
-    parser.add_argument('--learning_rate', type=float, help="L2 regularization constant", default=0.01)
+    parser.add_argument('--learning_rate', type=float, help="L2 regularization constant", default=0.00001)
     parser.add_argument('--train_proportion', type=float, help="percentage of data to use as training", default=0.95)
     parser.add_argument('--test_proportion', type=float, help="percentage of data to use as testing", default=None)
     args = parser.parse_args()

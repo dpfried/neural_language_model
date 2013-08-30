@@ -14,20 +14,30 @@ def parse_line(line):
     return token_string_dd.split(), int(count_string)
 
 def line_iterator(glob_path):
-    return (line for fname in glob(glob_path) for line in gzip.open(fname))
+    for fname in glob(glob_path):
+        try:
+            with gzip.open(fname) as f:
+                for line in f:
+                    yield line
+        except IOError as e:
+            print 'for file %s' % fname
+            print e
 
 import nltk
 
-def build_frequency_counts(lines):
-    frequency_counts = nltk.FreqDist()
+def build_frequency_counts(lines, frequency_counts=None):
+    N = 0
+    if frequency_counts is None:
+        frequency_counts = nltk.FreqDist()
     for line in lines:
+        N += 1
         tokens, count = parse_line(line)
         for token in tokens:
             frequency_counts[token] += count
-    return frequency_counts
+    return frequency_counts, N
 
 def build_id_map(frequency_counts, num_words=None):
-    """given a FreqDist, return a dictinoary mapping words to
+    """given a FreqDist, return a dictionary mapping words to
     integer indices (by frequency), limited by num_words
     if given. if num_words is None, will map all words
     from the FreqDist"""
@@ -39,21 +49,19 @@ def build_id_map(frequency_counts, num_words=None):
     from collections import defaultdict
     return defaultdict(int, word_to_tokens)
 
-def matrix_rep(lines, frequency_counts=None, id_map=None, num_words=None):
-    if frequency_counts is None:
-        lines = list(lines)
-        frequency_counts = build_frequency_counts(lines)
-    if id_map is None:
-        id_map = build_id_map(frequency_counts, num_words=num_words)
+def matrix_rep(lines, frequency_counts, id_map):
     def line_to_row(line):
         tokens, count = parse_line(line)
         indices = [id_map[token] for token in tokens]
         return indices + [count]
-    return np.array([line_to_row(line) for line in lines], dtype=DTYPE), frequency_counts, id_map
+    return np.array([line_to_row(line) for line in lines], dtype=DTYPE)
 
-def read_data(glob_path, num_words=None):
-    frequency_counts = build_frequency_counts(line_iterator(glob_path))
+def dictionaries_for_files(glob_path, num_words=None):
+    frequency_counts, N = build_frequency_counts(line_iterator(glob_path))
     id_map = build_id_map(frequency_counts, num_words=num_words)
+    return frequency_counts, id_map, N
+
+def ngrams_for_files(glob_path, frequency_counts, id_map):
     return matrix_rep(line_iterator(glob_path), frequency_counts, id_map)
 
 DATA_BY_SIZE = ['/cl/nldata/books_google_ngrams_eng/5gms/5gm-100.gz',
@@ -83,10 +91,9 @@ class NGramsContainer(object):
         self.construct()
 
     def construct(self):
-        self.token_count_matrix, self.frequency_counts, id_map = read_data(self.glob_path, num_words=self.num_words)
-        self.id_map = id_map
+        self.frequency_counts, self.id_map, self.n_examples = dictionaries_for_files(self.glob_path, num_words=self.num_words)
+        self.token_count_matrix = ngrams_for_files(self.glob_path, self.frequency_counts, self.id_map)
         n_examples, width = self.token_count_matrix.shape
-        self.n_examples = n_examples
         self.n_gram_length = width - 1
         # use max instead of length because defaultdict adds values on get,
         # even if not present in the dictionary

@@ -91,6 +91,7 @@ if __name__ == '__main__':
     import gzip
     parser = argparse.ArgumentParser()
     parser.add_argument('--write_ngrams', help="path to write ngram pickle to")
+    parser.add_argument('--write_dictionary', help="path to write dictionary pickle to")
     parser.add_argument('--load_ngrams', help="path to load ngram pickle from (supersedes")
     parser.add_argument('--model_basename', help="basename to write model to")
     parser.add_argument('--corpus_size', type=int, help="0, 1, 2, or 3", default=0)
@@ -120,7 +121,12 @@ if __name__ == '__main__':
     if args.write_ngrams:
         print 'dumping n_grams to %s...' % args.write_ngrams
         with gzip.open(args.write_ngrams, 'wb') as f:
-            cPickle.dump(n_grams, f, protocol=2)
+            cPickle.dump(n_grams, f)
+
+    if args.write_dictionary:
+        print 'dumping dictionary to %s...' % args.write_dictionary
+        with gzip.open(args.write_dictionary, 'wb') as f:
+            cPickle.dump(n_grams.id_map, f)
 
     print 'extracting data...'
     rng = np.random.RandomState(args.rng_seed)

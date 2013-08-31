@@ -3,22 +3,23 @@ import cPickle
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
 import gzip
+import ngrams
 
 def load_zipped_pickle(pickle_fname):
     with gzip.open(pickle_fname, 'rb') as f:
         return cPickle.load(f)
 
-def make_query_fn(classifier_path, n_gram_path='data/n_grams.pkl.gz'):
-    n_grams = load_zipped_pickle(n_gram_path)
+def make_query_fn(classifier_path, ngram_file='/cl/nldata/books_google_ngrams_eng/5grams_size3.hd5'):
+    ngram_reader = ngrams.NgramReader(ngram_file)
     classifier = load_zipped_pickle(classifier_path)
     embeddings = classifier.embedding_layer.embedding
     dist_matrix = squareform(pdist(embeddings, 'euclidean'))
-    id_map = n_grams.id_map
+    id_map = dict((word, index) for (index, word) in enumerate(ngram_reader.word_array))
     reverse_map = dict((value, key) for (key, value) in id_map.items())
     reverse_map[0] = 'RARE'
 
     def query(word, n=10):
-        if word not in n_grams.id_map:
+        if word not in id_map:
             raise Exception('%s not in vocabulary' % word)
         index = id_map[word]
 

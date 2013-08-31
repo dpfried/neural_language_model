@@ -1,10 +1,8 @@
-import numpy as np
-import h5py
-from ngrams_reader import dictionaries_for_files, ngrams_for_files, DTYPE, DATA_BY_SIZE
-from glob import glob
-import sys
-from collections import defaultdict
 import math
+import h5py
+import numpy as np
+from collections import defaultdict
+
 from utils import sample_cumulative_discrete_distribution
 
 class NgramReader(object):
@@ -48,7 +46,7 @@ class NgramReader(object):
         """
         rows, cols = ngram_matrix.shape
         new_block = np.empty((rows, cols + 1), dtype=np.uint64)
-        zero_mask = ngram_matrix[:, :-1] > self.vocab_size
+        zero_mask = ngram_matrix[:, :-1] >= self.vocab_size
         copy_mask = np.logical_not(zero_mask)
         new_block[zero_mask] = 0
         new_block[copy_mask] = ngram_matrix[copy_mask]
@@ -92,64 +90,8 @@ class NgramReader(object):
             replacement_word = sample_cumulative_discrete_distribution(self.cumulative_word_frequencies)
             if replacement_word != 0 and replacement_word != symbols[column_index]:
                 break
-        assert replacement_word <= self.vocab_size
+        assert replacement_word < self.vocab_size
 
         noisy = symbols.copy()
         noisy[column_index] = replacement_word
         return noisy
-
-def build_hd5(hd5_filename, ngram_file_glob, ngram_length=5, row_chunksize=10000):
-    print '...first pass: building frequency counts and word to token map for files in %s' % ngram_file_glob
-    frequency_counts, id_map, n_rows = dictionaries_for_files(ngram_file_glob)
-    print '...creating hd5 file'
-
-    hd5_file = h5py.File(hd5_filename, 'w')
-    hd5_file.attrs['contained_files'] = ngram_file_glob
-
-    cols = ngram_length + 1
-
-    words, frequencies = zip(*frequency_counts.items())
-
-    word_array = np.array(['RARE'] + list(words))
-    frequency_array = np.array([0] + list(frequencies))
-
-    hd5_file.create_dataset("words", data = word_array)
-    hd5_file.create_dataset("word_frequencies", data=frequency_array)
-
-    hd5_file.flush()
-
-    ngram_dset = hd5_file.create_dataset("%d_grams" % ngram_length,
-                                   shape=(n_rows, cols),
-                                   dtype=DTYPE,
-                                   maxshape=(None, cols),
-                                   chunks=(row_chunksize, cols))
-
-    fnames = glob(ngram_file_glob)
-    read_rows = 0
-    flush_every=20
-    for file_count, filename in enumerate(glob(ngram_file_glob)):
-        sys.stdout.write('reading file %i / %i (%s)\r' % (file_count, len(fnames), filename))
-        sys.stdout.flush()
-        try:
-            ngram_mat = ngrams_for_files(filename, frequency_counts=frequency_counts, id_map=id_map)
-            this_rows, _ = ngram_mat.shape
-            ngram_dset[read_rows:read_rows + this_rows, :] = ngram_mat
-            read_rows += this_rows
-            if (file_count + 1) % flush_every == 0:
-                hd5_file.flush()
-        except IOError as e:
-            print 'for file %s' % filename
-            print e
-
-    print
-    print "complete.. writing file"
-    hd5_file.close()
-
-if __name__ == "__main__":
-    import time
-    for i, file_glob in enumerate(DATA_BY_SIZE):
-        print 'size %i' % i
-        old_time = time.clock()
-        build_hd5('/cl/nldata/books_google_ngrams_eng/5grams_size%i.hd5' % i, file_glob)
-        print 'elapsed time: %i seconds' % (time.clock() - old_time)
-        print

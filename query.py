@@ -10,8 +10,8 @@ def load_zipped_pickle(pickle_fname):
         return cPickle.load(f)
 
 def make_query_fn(classifier_path, ngram_file='/cl/nldata/books_google_ngrams_eng/5grams_size3.hd5'):
-    ngram_reader = ngrams.NgramReader(ngram_file)
     classifier = load_zipped_pickle(classifier_path)
+    ngram_reader = ngrams.NgramReader(ngram_file, vocab_size=classifier.vocab_size)
     embeddings = classifier.embedding_layer.embedding
     dist_matrix = squareform(pdist(embeddings, 'euclidean'))
     id_map = dict((word, index) for (index, word) in enumerate(ngram_reader.word_array))

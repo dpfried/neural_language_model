@@ -44,7 +44,11 @@ class EmbeddingLayer(object):
         return T.concatenate(embeddings)
 
     def embeddings_from_symbols(self, symbol_indices):
-        return self.embedding[symbol_indices]
+        try:
+            return self.embedding[symbol_indices]
+        except IndexError as e:
+            print symbol_indices
+            raise e
 
     def update_embeddings(self, symbol_indices, updates):
         self.embedding[symbol_indices] += np.array(updates)

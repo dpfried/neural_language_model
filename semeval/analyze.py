@@ -16,10 +16,10 @@ def parse_accuracy(filename):
     return float(attrs['Overall Accuracy'].strip('%')) / 100.
 
 # compute average correlation
-corrs = [parse_correlation(filename) for filename in glob('NLM/Testing/SpearmanNLMScaled-*.txt')]
+corrs = [parse_correlation(filename) for filename in glob('NLM/Testing_old/SpearmanNLMScaled-*.txt')]
 
 # compute average accuracy
-accuracy = [parse_accuracy(filename) for filename in glob('NLM/Testing/MaxDiffNLM-*.txt')]
+accuracy = [parse_accuracy(filename) for filename in glob('NLM/Testing_old/MaxDiffNLM-*.txt')]
 
 print 'average correlation: %f' % np.mean(corrs)
 print 'average accuracy: %f' % np.mean(accuracy)

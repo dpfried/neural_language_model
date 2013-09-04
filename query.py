@@ -1,7 +1,7 @@
 # coding: utf-8
 import cPickle
 import numpy as np
-from scipy.spatial.distance import pdist, squareform
+from scipy.spatial.distance import pdist, squareform, cdist
 import gzip
 import ngrams
 from collections import defaultdict
@@ -41,19 +41,31 @@ def make_analogy_fns(classifier, ngram_reader):
         return list(reversed(sorted(zip(scores, other_pairs))))
     return analogy_fn, choose_best
 
+def top_indices_from_distances(distances, reverse_map, n=10):
+    sorted_indices = np.argsort(distances)
+    top_indices = sorted_indices[:n]
+    print top_indices
+    return [(reverse_map[i], distances[i]) for i in top_indices]
+
 def make_query_fn(classifier, ngram_reader):
     embeddings = classifier.embedding_layer.embedding
     dist_matrix = squareform(pdist(embeddings, 'cosine'))
     id_map, reverse_map = maps(ngram_reader)
-    reverse_map[0] = 'RARE'
 
     def query(word, n=10):
         if word not in id_map:
             raise Exception('%s not in vocabulary' % word)
         index = id_map[word]
-
-        sorted_indices = np.argsort(dist_matrix[index,:])
-        top_indices = sorted_indices[:n]
-        print top_indices
-        return [(reverse_map[i], dist_matrix[index,i]) for i in top_indices]
+        return top_indices_from_distances(dist_matrix[index,:], reverse_map, n=n)
     return query
+
+def query(classifier, ngram_reader, word, n=10):
+    id_map, reverse_map = maps(ngram_reader)
+    if word not in id_map:
+        raise Exception('%s not in vocabulary' % word)
+    index = id_map[word]
+    embeddings = classifier.embedding_layer.embedding
+    this_embedding = embeddings[index]
+    distances = cdist(this_embedding[np.newaxis,:], embeddings, 'cosine').flatten()
+    return top_indices_from_distances(distances, reverse_map, n=n)
+

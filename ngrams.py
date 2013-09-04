@@ -19,7 +19,7 @@ class NgramReader(object):
             self.word_frequencies = self.hd5_file['word_frequencies'][:vocab_size]
         else:
             self.word_array = self.hd5_file['words']
-            self.word_frequencies = self.hd5_file
+            self.word_frequencies = self.hd5_file['word_frequencies']
 
         self.cumulative_word_frequencies = np.cumsum(self.word_frequencies)
         self.ngrams = self.hd5_file['%i_grams' % ngram_length]
@@ -95,3 +95,6 @@ class NgramReader(object):
         noisy = symbols.copy()
         noisy[column_index] = replacement_word
         return noisy
+
+class PosNgramReader(NgramReader):
+    pass

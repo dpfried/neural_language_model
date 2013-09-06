@@ -8,7 +8,8 @@ import h5py
 from collections import defaultdict
 from corpus_creator import DTYPE
 
-base_url='http://storage.googleapis.com/books/ngrams/books/googlebooks-eng-all-1gram-20120701-%s.gz'
+base_url_1grams='http://storage.googleapis.com/books/ngrams/books/googlebooks-eng-all-1gram-20120701-%s.gz'
+base_url_5grams='http://storage.googleapis.com/books/ngrams/books/googlebooks-eng-all-5gram-20120701-%s.gz'
 
 # urls_1grams = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'other', 'p', 'pos', 'punctuation', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',]
 urls_1grams = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'other', 'p', 'pos', 'punctuation', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',]
@@ -21,9 +22,8 @@ def buffered_download(url):
         yield line.rstrip('\n')
 
 def parse_line(line):
-    splits = line.split('\t')
-    tokens = splits[:-3]
-    year_string, total_count_string, book_count_string = splits[-3:]
+    token_string, year_string, total_count_string, book_count_string = line.split('\t')
+    tokens = token_string.split()
     return tokens, int(year_string), int(total_count_string), int(book_count_string)
 
 def save_state(save_state_file, counter, current_line_num, current_url):
@@ -40,7 +40,7 @@ def build_vocabulary(save_state_file='state.pkl.gz'):
     for url_suffix in urls_1grams:
         print url_suffix
         current_line_num = 0
-        for line in buffered_download(base_url % url_suffix):
+        for line in buffered_download(base_url_1grams % url_suffix):
             current_line_num += 1
             total_line_count += 1
             try:
@@ -54,14 +54,15 @@ def build_vocabulary(save_state_file='state.pkl.gz'):
             save_state(save_state_file, counter, current_line_num, url_suffix)
     return counter
 
-def initialize_hd5_file(hd5_filename):
-    print '...first pass: building frequency counts and word to token map for files'
-    frequency_counts = build_vocabulary()
+def initialize_hd5_file(hd5_filename, frequency_counts=None):
+    if frequency_counts is None:
+        print '...first pass: building frequency counts and word to token map for files'
+        frequency_counts = build_vocabulary()
     print '...creating hd5 file'
 
     hd5_file = h5py.File(hd5_filename, 'w')
 
-    words, frequencies = zip(*[(word, count) for (word, count) in frequency_counts.items()
+    words, frequencies = zip(*[(word.encode('ascii', 'ignore'), count) for (word, count) in frequency_counts.items()
                                if '_' in word])
 
     word_array = np.array(['RARE'] + list(words))
@@ -74,9 +75,11 @@ def initialize_hd5_file(hd5_filename):
 
 def add_ngrams_to_hd5(hd5_filename, save_state_file='ngram_state.txt', ngram_length=5, row_chunksize=10000):
     hd5_file = h5py.File(hd5_filename, 'r+')
+    print 'building id_map'
     id_map = defaultdict(int, dict(
         (word, index) for (index, word) in enumerate(hd5_file['words'][...])
     ))
+    print 'finished building id_map'
 
     n_rows = 1
     cols = ngram_length + 3 # for year, total count, and book count
@@ -87,11 +90,12 @@ def add_ngrams_to_hd5(hd5_filename, save_state_file='ngram_state.txt', ngram_len
                                    maxshape=(None, cols),
                                    chunks=(row_chunksize, cols))
     total_n_rows = 0
+    print 'parsing streams'
     for url_suffix in urls_5grams:
         print url_suffix
         vectors = []
         vector_count = 0
-        for line in buffered_download(base_url % url_suffix):
+        for line in buffered_download(base_url_5grams % url_suffix):
             tokens, year, total_count, book_count = parse_line(line)
             if all('_' in token for token in tokens):
                 sym_ids = [id_map[token] for token in tokens]
@@ -100,7 +104,7 @@ def add_ngrams_to_hd5(hd5_filename, save_state_file='ngram_state.txt', ngram_len
                 if vector_count % row_chunksize == 0:
                     total_n_rows += vector_count
                     ngram_dset.resize(total_n_rows, axis=0)
-                    ngram_dset[:-vector_count] = np.array(vectors)
+                    ngram_dset[-vector_count:] = np.array(vectors)
                     vectors = []
                     vector_count = 0
         print "writing to hd5 file"
@@ -110,4 +114,5 @@ def add_ngrams_to_hd5(hd5_filename, save_state_file='ngram_state.txt', ngram_len
 
 if __name__ == "__main__":
     filename = '/cl/nldata/books_google_ngrams_eng/pos_5grams.hd5'
-    initialize_hd5_file(filename)
+    # initialize_hd5_file(filename)
+    add_ngrams_to_hd5(filename)

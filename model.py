@@ -218,3 +218,19 @@ class NLM(object):
     def score(self, sequence):
         embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in sequence]
         return self.score_ngram(*embeddings)
+
+    def dump_embeddings(self, filename, index_to_word, normalize=True, precision=8):
+        format_str = '%%0.%if' % precision
+        float_to_str = lambda f: format_str % f
+        print normalize
+        with open(filename, 'w') as f:
+            for index, embedding in enumerate(self.embedding_layer.embedding):
+                # skip RARE
+                if index == 0:
+                    continue
+                if normalize:
+                    vector = embedding / np.sqrt(np.dot(embedding, embedding))
+                else:
+                    vector = embedding
+                vector_string_rep = ' '.join(map(float_to_str, vector))
+                f.write('%s %s\n' % (index_to_word[index], vector_string_rep))

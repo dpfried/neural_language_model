@@ -31,7 +31,7 @@ if __name__ == "__main__":
     paradigms = get_paradigms(question_file)
     examples = get_examples(answer_file)
 
-    classifier, ngram_reader = load_classifier_and_ngrams('/home/dfried/code/nlm/new_sample/model-1.pkl.gz')
+    classifier, ngram_reader = load_classifier_and_ngrams('/home/dfried/code/nlm/new_sample/model-2237.pkl.gz')
     analogy_fn, choose_best = make_analogy_fns(classifier, ngram_reader)
 
     paradigm_analogies = [analogy_fn(*pair) for pair in paradigms]

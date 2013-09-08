@@ -25,7 +25,7 @@ if __name__ == "__main__":
         paths = WunschPaths(wn.all_synsets())
         safe_sim = safe_similarity_wrapper(lambda x, y: lch_similarity(paths, x, y))
         # safe_sim = safe_similarity_wrapper(lambda x, y: x.lch_similarity(y))
-        similarity_matrix = make_similarity_matrix(reader.word_array[:args.vocab_size], similarity_fn=safe_sim)
+        similarity_matrix = make_similarity_matrix(reader.word_array[:args.vocab_size], similarity_fn=safe_sim, reduction_fn=reduction_fn)
         print 'writing to file %s' % args.filename
         with open(args.filename, 'w') as f:
             np.save(args.filename, similarity_matrix)

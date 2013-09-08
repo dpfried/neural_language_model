@@ -125,16 +125,18 @@ class HiddenLayer(object):
         return self.activation(T.dot(input, self.W) + self.b)
 
 class NLM(object):
-    def __init__(self, rng, vocab_size, dimensions, sequence_length, n_hidden, L1_reg, L2_reg, other_params={}):
+    def __init__(self, rng, vocabulary, dimensions, sequence_length, n_hidden, L1_reg, L2_reg, other_params={}):
         # initialize parameters
         self.rng = rng
-        self.vocab_size = vocab_size
+        self.vocabulary = vocabulary
+        self.vocab_size = len(vocabulary)
         self.dimensions = dimensions
         self.sequence_length = sequence_length
         self.n_hidden = n_hidden
         self.L1_reg = L1_reg
         self.L2_reg = L2_reg
         self.other_params = other_params
+        self.blocks_trained = 0
 
         self._build_layers()
         self._build_functions()
@@ -163,8 +165,12 @@ class NLM(object):
     def score_symbolic(self, sequence_embedding):
         return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, sequence_embedding)
 
-    def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding):
-        return T.clip(1 - self.score_symbolic(correct_sequence_embedding) + self.score_symbolic(error_sequence_embedding), 0, np.inf)
+    # def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding):
+    #     return T.clip(1 - self.score_symbolic(correct_sequence_embedding) + self.score_symbolic(error_sequence_embedding), 0, np.inf)
+
+    def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding, logistic_scaling_factor=1.0):
+        score_difference = self.score_symbolic(correct_sequence_embedding) - self.score_symbolic(error_sequence_embedding)
+        return T.log(1 + T.exp(logistic_scaling_factor * -1 * score_difference))
 
     def _build_functions(self):
         # create symbolic variables for correct and error input

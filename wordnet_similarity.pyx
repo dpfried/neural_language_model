@@ -5,7 +5,13 @@ import sys
 import math
 from cython.parallel cimport prange
 
-def lch_similarity(wunsch_paths, self, other):
+def pos_depth(synset):
+    if synset.pos not in synset._wordnet_corpus_reader._max_depth:
+        synset._wordnet_corpus_reader._compute_max_depth(synset.pos, True)
+
+    return synset._wordnet_corpus_reader._max_depth[synset.pos]
+
+def lch_similarity(wunsch_paths, synset1, synset2):
         """
         Leacock Chodorow Similarity:
         Return a score denoting how similar two word senses are, based on the
@@ -21,19 +27,34 @@ def lch_similarity(wunsch_paths, self, other):
             depth.
         """
 
-        if self.pos != other.pos:
+        if synset1.pos != synset2.pos:
             return None
 
-        if self.pos not in self._wordnet_corpus_reader._max_depth:
-            self._wordnet_corpus_reader._compute_max_depth(self.pos, True)
+        distance = wunsch_paths.synset_path_distance(synset1, synset2)
 
-        depth = self._wordnet_corpus_reader._max_depth[self.pos]
-
-        distance = wunsch_paths.synset_path_distance(self, other)
+        depth = pos_depth(synset1)
 
         if distance is None or distance < 0 or depth == 0:
             return None
         return -math.log((distance + 1) / (2.0 * depth))
+
+def distance_norm(reference_synset):
+    depth = pos_depth(reference_synset)
+    if depth == 0:
+        return None
+    return -math.log(1. / (2.0 * depth))
+
+def scaled_lch_similarity(wunsch_paths, synset1, synset2):
+    lch_sim = lch_similarity(wunsch_paths, synset1, synset2)
+    if lch_sim is None:
+        return None
+    # since they both have the same POS both should have the same
+    # distance norm (if they don't have the same POS lch_similarity
+    # is undefined, returns None, and we've already terminated
+    dist_norm = distance_norm(synset1)
+    if dist_norm is None:
+        return None
+    return 2 * (lch_sim / dist_norm) - 1
 
 class WunschNode(object):
     INNER, ROOT, TREE, LEAF = range(1, 5)
@@ -126,6 +147,10 @@ class WunschNode(object):
         raise Exception('tree_distance not defined for nodes in separate trees: %s, %s' % (self, other))
 
 class WunschPaths(object):
+    """
+    Algorithm from ``Exploiting graph structure for accelerating the calculation of shortest paths in Wordnets'',
+    by Holger Wunsch
+    """
     def __init__(self, synsets, cache_lookups=False):
         self.base_node = WunschNode(0, None)
         self.base_node.class_ = WunschNode.INNER
@@ -206,8 +231,12 @@ class WunschPaths(object):
         for node in self.nodes:
             if node.class_ == WunschNode.LEAF:
                 parent = node.get_single_parent()
-                if parent.class_ == WunschNode.ROOT or parent.class_ == WunschNode.LEAF:
-                    node.class_ == WunschNode.TREE
+                # note: there appears to be an error in the pseudocode in the
+                # paper, it says that nodes with ROOT or LEAF parents should be changed to
+                # tree, but it's not possible for a LEAF node to have another
+                # LEAF node as parent (since LEAF nodes have no children)
+                if parent.class_ == WunschNode.ROOT or parent.class_ == WunschNode.TREE:
+                    node.class_ = WunschNode.TREE
 
         # store a reference to the root node in all nodes of a tree
         for node in self.nodes:
@@ -298,7 +327,7 @@ def pairwise_similarity(synsets1, synsets2, similarity_fn=safe_similarity_wrappe
     """
     pairwise_sims = (similarity_fn(synset1, synset2) for (synset1, synset2) in itertools.product(synsets1, synsets2))
     if remove_zeros:
-        replaced = [s for s in pairwise_sims if (s != None and s != 0)]
+        replaced = [s for s in pairwise_sims if (s is not None and s != 0)]
     else:
         replaced = [s for s in pairwise_sims if s is not None]
     if not replaced:
@@ -306,7 +335,7 @@ def pairwise_similarity(synsets1, synsets2, similarity_fn=safe_similarity_wrappe
     else:
         return reduction_fn(replaced)
 
-def make_similarity_matrix(words, print_output=True, cores=12, **kwargs):
+def make_similarity_matrix(words, print_output=True, **kwargs):
     # todo: how do we handle the diagonals?
     cdef int N
     N = len(words)
@@ -322,7 +351,7 @@ def make_similarity_matrix(words, print_output=True, cores=12, **kwargs):
                 sys.stdout.write('\r%i / %i \t (%0.2f) \t %s' % (index1, N, float(index1) / N, word1))
                 sys.stdout.flush()
                 pass
-            vals = np.array([pairwise_similarity(synsets1, synsets_for_word[index2])
+            vals = np.array([pairwise_similarity(synsets1, synsets_for_word[index2], **kwargs)
                     for index2 in xrange(index1, N)])
             similarity_matrix[index1,index1:] = vals
             similarity_matrix[index1:,index1] = vals

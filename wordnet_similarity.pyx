@@ -21,6 +21,9 @@ def lch_similarity(wunsch_paths, self, other):
             depth.
         """
 
+        if self.pos != other.pos:
+            return None
+
         if self.pos not in self._wordnet_corpus_reader._max_depth:
             self._wordnet_corpus_reader._compute_max_depth(self.pos, True)
 
@@ -30,7 +33,7 @@ def lch_similarity(wunsch_paths, self, other):
 
         if distance is None or distance < 0 or depth == 0:
             return None
-        return -math.log((distance + 1) / (2.0 * depth) + 1)
+        return -math.log((distance + 1) / (2.0 * depth))
 
 class WunschNode(object):
     INNER, ROOT, TREE, LEAF = range(1, 5)
@@ -318,13 +321,10 @@ def make_similarity_matrix(words, print_output=True, cores=12, **kwargs):
             if print_output:
                 sys.stdout.write('\r%i / %i \t (%0.2f) \t %s' % (index1, N, float(index1) / N, word1))
                 sys.stdout.flush()
-            if not synsets1:
-                similarity_matrix[:,index1] = np.nan
-                similarity_matrix[index1,:] = np.nan
-                continue
+                pass
             vals = np.array([pairwise_similarity(synsets1, synsets_for_word[index2])
                     for index2 in xrange(index1, N)])
-            similarity_matrix[:,index1:] = vals
-            similarity_matrix[index1:,:] = vals
+            similarity_matrix[index1,index1:] = vals
+            similarity_matrix[index1:,index1] = vals
     print
     return similarity_matrix

@@ -24,15 +24,17 @@ if __name__ == "__main__":
         reader = NgramReader(args.ngram_file)
         paths = WunschPaths(wn.all_synsets())
         safe_sim = safe_similarity_wrapper(lambda x, y: lch_similarity(paths, x, y))
+        # safe_sim = safe_similarity_wrapper(lambda x, y: x.lch_similarity(y))
         similarity_matrix = make_similarity_matrix(reader.word_array[:args.vocab_size], similarity_fn=safe_sim)
         print 'writing to file %s' % args.filename
         with open(args.filename, 'w') as f:
             np.save(args.filename, similarity_matrix)
         print 'done'
     finally:
-        try:
-            import IPython
-            IPython.embed()
-        except:
-            import code
-            code.interact(local=locals())
+        pass
+    #     try:
+    #         import IPython
+    #         IPython.embed()
+    #     except:
+    #         import code
+    #         code.interact(local=locals())

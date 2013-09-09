@@ -1,6 +1,5 @@
 import numpy as np
 from model import NLM
-import cPickle
 import time
 import sys
 from ngrams import NgramReader
@@ -9,7 +8,7 @@ from wordnet_similarity import scaled_lch_similarity, pairwise_similarity, Wunsc
 from nltk.corpus import wordnet
 
 def constant_weight(model, semantic_similarity_fn, replacement_column_index, correct_symbols, error_symbols, **kwargs):
-    return 1
+    return 1, None, None
 
 def semantic_vs_embedding_weight(model, semantic_similarity_fn, replacement_column_index, correct_symbols, error_symbols, **kwargs):
     """
@@ -41,7 +40,7 @@ def semantic_vs_embedding_weight(model, semantic_similarity_fn, replacement_colu
 
     if correct_symbol == 0 or error_symbol == 0:
         # we're dealing with the RARE word
-        return 1
+        return 1, None, None
 
     # get the word embeddings corresponding to the target word in correct and
     # corrupted ngrams from the model
@@ -56,9 +55,9 @@ def semantic_vs_embedding_weight(model, semantic_similarity_fn, replacement_colu
     error_word = model.vocabulary[error_symbol]
     semantic_similarity = pairwise_similarity(wordnet.synsets(correct_word), wordnet.synsets(error_word), similarity_fn=semantic_similarity_fn, **kwargs)
     if semantic_similarity is not None:
-        return np.exp(-1.0 * embedding_similarity * semantic_similarity)
+        return np.exp(-1.0 * embedding_similarity * semantic_similarity), embedding_similarity, semantic_similarity
     else:
-        return 1
+        return 1, None, None
 
 def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, weight_fn=constant_weight, save_model_frequency=10, other_params={}):
     print '... building the model'
@@ -126,6 +125,9 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
         # sample block_size ngrams from the training block, by frequency
         # in the original corpus. Using block_size as the sample size is
         # pretty arbitrary
+        weights = []
+        embedding_similarities = []
+        semantic_similarities = []
         for count in xrange(block_size):
             if count % print_freq == 0:
                 sys.stdout.write('\rblock %i: training instance %d of %d (%f %%)\r' % (block_count, count, block_size, 100. * count / block_size))
@@ -133,11 +135,15 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
             train_index = sample_cumulative_discrete_distribution(training_block[:,-1])
             correct_symbols, error_symbols, ngram_frequency = process_data_row(training_block[train_index])
             # calculate the weight as a function of the correct symbols and error symbols
-            weight = weight_fn(model=nlm_model,
-                               semantic_similarity_fn=scaled_similarity,
-                               replacement_column_index=replacement_column_index,
-                               correct_symbols=correct_symbols,
-                               error_symbols=error_symbols)
+            weight, embedding_similarity, semantic_similarity = weight_fn(model=nlm_model,
+                                                                          semantic_similarity_fn=scaled_similarity,
+                                                                          replacement_column_index=replacement_column_index,
+                                                                          correct_symbols=correct_symbols,
+                                                                          error_symbols=error_symbols)
+            weights.append(weight)
+            if semantic_similarity is not None:
+                embedding_similarities.append(embedding_similarity)
+                semantic_similarities.append(semantic_similarity)
             costs.append(nlm_model.train(correct_symbols, error_symbols, learning_rate * weight))# * ngram_frequency))
 
         this_training_cost = np.mean(costs)
@@ -168,6 +174,15 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
         sys.stdout.write('\033[k\r')
         sys.stdout.flush()
         print 'block %i \t training cost %f %% \t test score %s \t test wt score %s \t %f seconds' % (block_count, this_training_cost, test_score_str, test_wt_score_str, current_time - last_time)
+        print 'average weight %f std dev %f' % (np.mean(weights), np.std(weights))
+        if embedding_similarities:
+            print 'average embedding sim %f std dev %f' % (np.mean(embedding_similarities), np.std(embedding_similarities))
+        else:
+            print 'no embedding similarities'
+        if semantic_similarities:
+            print 'average semantic sim %f std dev %f' % (np.mean(semantic_similarities), np.std(semantic_similarities))
+        else:
+            print 'no semantic similarities'
         last_time = current_time
 
         if save_model_basename and block_count % save_model_frequency == 0:

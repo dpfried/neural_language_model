@@ -125,8 +125,10 @@ class HiddenLayer(object):
         return self.activation(T.dot(input, self.W) + self.b)
 
 class NLM(object):
-    def __init__(self, rng, vocabulary, dimensions, sequence_length, n_hidden, L1_reg, L2_reg, other_params={}):
+    def __init__(self, rng, vocabulary, dimensions, sequence_length, n_hidden, L1_reg, L2_reg, other_params=None):
         # initialize parameters
+        if other_params is None:
+            other_params = {}
         self.rng = rng
         self.vocabulary = vocabulary
         self.vocab_size = len(vocabulary)
@@ -165,12 +167,12 @@ class NLM(object):
     def score_symbolic(self, sequence_embedding):
         return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, sequence_embedding)
 
-    # def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding):
-    #     return T.clip(1 - self.score_symbolic(correct_sequence_embedding) + self.score_symbolic(error_sequence_embedding), 0, np.inf)
+    def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding):
+        return T.clip(1 - self.score_symbolic(correct_sequence_embedding) + self.score_symbolic(error_sequence_embedding), 0, np.inf)
 
-    def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding, logistic_scaling_factor=1.0):
-        score_difference = self.score_symbolic(correct_sequence_embedding) - self.score_symbolic(error_sequence_embedding)
-        return T.log(1 + T.exp(logistic_scaling_factor * -1 * score_difference))
+    # def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding, logistic_scaling_factor=1.0):
+    #     score_difference = self.score_symbolic(correct_sequence_embedding) - self.score_symbolic(error_sequence_embedding)
+    #     return T.log(1 + T.exp(logistic_scaling_factor * -1 * score_difference))
 
     def _build_functions(self):
         # create symbolic variables for correct and error input
@@ -219,7 +221,7 @@ class NLM(object):
         self.embedding_layer.update_embeddings(correct_sequence, correct_updates)
         self.embedding_layer.update_embeddings(error_sequence, error_updates)
 
-        return cost
+        return cost, correct_updates, error_updates
 
     def score(self, sequence):
         embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in sequence]

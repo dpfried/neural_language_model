@@ -27,7 +27,7 @@ def similarities(model, semantic_similarity_fn, correct_symbol, error_symbol, **
     return embedding_similarity, semantic_similarity
 
 
-def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None):
+def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None, update_related_weight=1.0):
     print '... building the model'
 
     if rng is None:
@@ -117,9 +117,9 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
             correct_symbol = correct_symbols[replacement_column_index]
             error_symbol = error_symbols[replacement_column_index]
             if correct_symbol != 0:
-                nlm_model.embedding_layer.update_embeddings(symbols_related_to(correct_symbol), correct_update)
+                nlm_model.embedding_layer.update_embeddings(symbols_related_to(correct_symbol), update_related_weight * correct_update)
             if error_symbol != 0:
-                nlm_model.embedding_layer.update_embeddings(symbols_related_to(error_symbol), error_update)
+                nlm_model.embedding_layer.update_embeddings(symbols_related_to(error_symbol), update_related_weight * error_update)
 
         this_training_cost = np.mean(costs)
         # so that when we pickle the model we have a record of how many blocks
@@ -188,6 +188,7 @@ if __name__ == '__main__':
     parser.add_argument('--test_proportion', type=float, help="percentage of data to use as testing", default=None)
     parser.add_argument('--save_model_frequency', type=int, help="save model every nth iteration", default=10)
     parser.add_argument('--stats_output_file', type=str, help="save stats to this file")
+    parser.add_argument('--update_related_weight', type=float, help="scale of updates to words in same synset as replaced and replacement words")
     args = parser.parse_args()
 
     ngram_reader = NgramReader(args.ngram_filename, vocab_size=args.vocab_size, train_proportion=args.train_proportion, test_proportion=args.test_proportion)
@@ -206,6 +207,7 @@ if __name__ == '__main__':
         'blocks_to_run':np.inf,
         'stats_output_file': args.stats_output_file,
         'save_model_frequency': args.save_model_frequency,
+        'update_related_weight': args.update_related_weight,
     }
     other_params = {
         'ngram_filename': args.ngram_filename,

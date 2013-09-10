@@ -25,14 +25,14 @@ def similarities(model, semantic_similarity_fn, correct_symbol, error_symbol, **
     return embedding_similarity, semantic_similarity
 
 
-def constant_weight(model, semantic_similarity_fn, replacement_column_index, correct_symbols, error_symbols, alpha_scaling=1.0, **kwargs):
+def constant_weight(model, semantic_similarity_fn, replacement_column_index, correct_symbols, error_symbols, alpha_scaling=1.0, embedding_scaling=1.0, semantic_scaling=1.0, **kwargs):
     correct_symbol = correct_symbols[replacement_column_index]
     error_symbol = error_symbols[replacement_column_index]
 
     embedding_similarity, semantic_similarity = similarities(model, semantic_similarity_fn, correct_symbol, error_symbol, **kwargs)
     return 1, embedding_similarity, semantic_similarity
 
-def semantic_vs_embedding_weight(model, semantic_similarity_fn, replacement_column_index, correct_symbols, error_symbols, alpha_scaling=1.0, **kwargs):
+def semantic_vs_embedding_weight(model, semantic_similarity_fn, replacement_column_index, correct_symbols, error_symbols, alpha_scaling=1.0, embedding_scaling=1.0, semantic_scaling=1.0, **kwargs):
     """
     given the NLM (which contains word embeddings) and the index of the word that was corrupted
     to make the error_symbols from correct_symbols, return the degree by which the cost function
@@ -63,12 +63,12 @@ def semantic_vs_embedding_weight(model, semantic_similarity_fn, replacement_colu
     embedding_similarity, semantic_similarity = similarities(model, semantic_similarity_fn, correct_symbol, error_symbol, **kwargs)
 
     if correct_symbol != 0 and error_symbol != 0 and semantic_similarity is not None:
-        weight = np.exp(-1.0 * alpha_scaling * embedding_similarity * semantic_similarity)
+        weight = np.exp(-1.0 * alpha_scaling * (embedding_similarity ** embedding_scaling) * (semantic_similarity ** semantic_scaling))
     else:
         weight = 1.0
     return weight, embedding_similarity, semantic_similarity
 
-def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, weight_fn=constant_weight, save_model_frequency=10, other_params={}, alpha_scaling=1.0, stats_output_file=None):
+def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, weight_fn=constant_weight, save_model_frequency=10, other_params={}, alpha_scaling=1.0, embedding_scaling=1.0, semantic_scaling=1.0, stats_output_file=None):
     print '... building the model'
 
     if rng is None:
@@ -152,7 +152,9 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
                                                                           replacement_column_index=replacement_column_index,
                                                                           correct_symbols=correct_symbols,
                                                                           error_symbols=error_symbols,
-                                                                          alpha_scaling=alpha_scaling)
+                                                                          alpha_scaling=alpha_scaling,
+                                                                          embedding_scaling=embedding_scaling,
+                                                                          semantic_scaling=semantic_scaling)
             weights.append(weight)
             if semantic_similarity is not None:
                 embedding_similarities.append(embedding_similarity)
@@ -256,6 +258,8 @@ if __name__ == '__main__':
     parser.add_argument('--test_proportion', type=float, help="percentage of data to use as testing", default=None)
     parser.add_argument('--weight_fn', type=str, help="weight function to use (%s)" % ' or '.join(weight_functions.keys()), default='constant')
     parser.add_argument('--alpha_scaling', type=float, help="exponential multiplier on weight function", default=1.0)
+    parser.add_argument('--embedding_scaling', type=float, help="exponential multiplier on embedding similarity in weight function", default=1.0)
+    parser.add_argument('--semantic_scaling', type=float, help="exponential multiplier on semantic similarity in weight function", default=1.0)
     parser.add_argument('--save_model_frequency', type=int, help="save model every nth iteration", default=10)
     parser.add_argument('--stats_output_file', type=str, help="save stats to this file")
     args = parser.parse_args()
@@ -278,6 +282,8 @@ if __name__ == '__main__':
         'stats_output_file': args.stats_output_file,
         'save_model_frequency': args.save_model_frequency,
         'alpha_scaling': args.alpha_scaling,
+        'embedding_scaling': args.embedding_scaling,
+        'semantic_scaling': args.semantic_scaling,
     }
     other_params = {
         'ngram_filename': args.ngram_filename,

@@ -1,4 +1,4 @@
-from query import load_classifier_and_ngrams
+from query import load_model_and_ngrams
 
 if __name__ == "__main__":
     import argparse
@@ -10,9 +10,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.ngram_file:
-        classifier, ngram_reader = load_classifier_and_ngrams(args.model, args.ngram_file)
+        model, ngram_reader = load_model_and_ngrams(args.model, args.ngram_file)
     else:
-        classifier, ngram_reader = load_classifier_and_ngrams(args.model)
+        model, ngram_reader = load_model_and_ngrams(args.model)
 
     print 'normalized:', not args.unnormalized
-    classifier.dump_embeddings(args.dump_filename, ngram_reader.word_array, normalize=not args.unnormalized)
+    model.dump_embeddings(args.dump_filename, ngram_reader.word_array, normalize=not args.unnormalized)

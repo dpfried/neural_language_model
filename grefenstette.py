@@ -1,5 +1,5 @@
 import numpy as np
-from query import cosine_similarity, load_classifier_and_ngrams, maps
+from query import cosine_similarity, load_model_and_ngrams, maps
 
 def parse_line(line):
     tokens = line.strip().split()
@@ -11,9 +11,9 @@ def parse_file(filename):
     with open(filename) as f:
         return [parse_line(line) for line in f]
 
-def make_verb_applicability_fn(classifier, ngram_reader):
+def make_verb_applicability_fn(model, ngram_reader):
     id_map, reverse_map = maps(ngram_reader)
-    E = classifier.embedding_layer.embedding
+    E = model.embedding_layer.embedding
     def verb_applicability(verb, noun1, noun2):
         for word in [verb, noun1, noun2]:
             if word not in id_map:
@@ -35,8 +35,8 @@ if __name__ == "__main__":
 
     parsed_lines = parse_file(args.verb_file)
 
-    classifier, ngram_reader = load_classifier_and_ngrams(args.model_file)
-    verb_applicability, compare_verbs = make_verb_applicability_fn(classifier, ngram_reader)
+    model, ngram_reader = load_model_and_ngrams(args.model_file)
+    verb_applicability, compare_verbs = make_verb_applicability_fn(model, ngram_reader)
 
     model_scores = []
     human_scores = []

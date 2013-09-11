@@ -2,6 +2,9 @@ import theano
 import theano.tensor as T
 import numpy as np
 from utils import grouper
+from nltk.corpus import wordnet as wn
+from collections import defaultdict
+import numpy as np
 
 # code adapted from DeepLearning tutorial:
 # deeplearning.net/tutorial/mlp.html
@@ -148,6 +151,51 @@ class NLM(object):
         self._build_layers()
         self._build_functions()
 
+    # this is ugly, use it because we didn't always save the vocab
+    def _get_vocabulary(self):
+        try:
+            return self.vocabulary
+        except:
+            import ngrams
+            ngram_reader = ngrams.NgramReader(self.other_params['ngram_filename'], vocab_size=self.vocab_size)
+            self.vocabulary = ngram_reader.word_array
+            return self.vocabulary
+
+    @property
+    def synset_to_symbol(self):
+        try:
+            return self._synset_to_symbol
+        except AttributeError:
+            self._synset_to_symbol = defaultdict(int, dict((synset, index)
+                                                           for index, synset in enumerate(self.synsets, 1)))
+            self._synset_to_symbol['NONE'] = 0
+            return self._synset_to_symbol
+
+    @property
+    def word_to_symbol(self):
+        try:
+            return self._word_to_symbol
+        except AttributeError:
+            self._word_to_symbol = defaultdict(int, dict((word, index)
+                                                         for index, word in enumerate(self._get_vocabulary(), 1)))
+            return self._word_to_symbol
+
+    @property
+    def symbol_to_word(self):
+        try:
+            return self._symbol_to_word
+        except AttributeError:
+            self._symbol_to_word = defaultdict(lambda : '*UNKNOWN*', dict(enumerate(self._get_vocabulary(), 1)))
+            return self._symbol_to_word
+
+    @property
+    def symbol_to_synset(self):
+        try:
+            return self._symbol_to_synset
+        except AttributeError:
+            self._symbol_to_synset = dict(enumerate(self.synsets, 1))
+            return self._symbol_to_synset
+
     def _build_layers(self):
         self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,
                                               dimensions=self.dimensions,
@@ -264,3 +312,34 @@ class NLM(object):
                     vector = embedding
                 vector_string_rep = ' '.join(map(float_to_str, vector))
                 f.write('%s %s\n' % (index_to_word[index], vector_string_rep))
+
+    def get_embedding(self, word, include_synsets=None, normalize_components=False):
+        """include_synsets: None, 'all' or 'top'"""
+        if word not in self.word_to_symbol:
+            print 'warning: %s not in vocab' % word
+        word_embedding = self.embedding_layer.embedding[self.word_to_symbol[word]]
+        if include_synsets is None:
+            components = [word_embedding]
+        else:
+            word_synsets = wn.synsets(word)
+            if not word_synsets:
+                indices = [0]
+            elif include_synsets == 'all':
+                indices = [self.synset_to_symbol[synset] for synset in word_synsets]
+            elif include_synsets == 'top':
+                indices = [self.synset_to_symbol[word_synsets[0]]]
+            synset_embedding = self.synset_embedding_layer.embedding[indices].mean(0)
+            components = [word_embedding, synset_embedding]
+        if normalize_components:
+            components = [component / np.linalg.norm(component, 2)
+                          for component in components]
+        return np.concatenate(components)
+
+    def get_synset_embedding(self, synset, normalize=False):
+        if synset not in self.synset_to_symbol:
+            print 'warning: %s not in known synsets' % synset
+        synset_embedding = self.synset_embedding_layer.embedding[self.synset_to_symbol[synset]]
+        if normalize:
+            return synset_embedding / np.linalg.norm(synset_embedding, 2)
+        else:
+            return synset_embedding

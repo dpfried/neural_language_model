@@ -12,10 +12,10 @@ def load_zipped_pickle(pickle_fname):
     with gzip.open(pickle_fname, 'rb') as f:
         return cPickle.load(f)
 
-def load_classifier_and_ngrams(classifier_path, ngram_file=DEFAULT_NGRAM_FILE):
-    classifier = load_zipped_pickle(classifier_path)
-    ngram_reader = ngrams.NgramReader(ngram_file, vocab_size=classifier.vocab_size)
-    return classifier, ngram_reader
+def load_model_and_ngrams(model_path, ngram_file=DEFAULT_NGRAM_FILE):
+    model = load_zipped_pickle(model_path)
+    ngram_reader = ngrams.NgramReader(ngram_file, vocab_size=model.vocab_size)
+    return model, ngram_reader
 
 def maps(ngram_reader):
     id_map = defaultdict(int, dict((word, index) for (index, word) in enumerate(ngram_reader.word_array)))
@@ -68,4 +68,3 @@ def query(classifier, ngram_reader, word, n=10):
     this_embedding = embeddings[index]
     distances = cdist(this_embedding[np.newaxis,:], embeddings, 'cosine').flatten()
     return top_indices_from_distances(distances, reverse_map, n=n)
-

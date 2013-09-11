@@ -4,7 +4,7 @@ import os
 from glob import glob
 import numpy as np
 import sys
-from query import load_classifier_and_ngrams,  make_analogy_fns
+from query import load_model_and_ngrams,  make_analogy_fns
 
 def attr_dict(filename):
     with open(filename) as f:
@@ -41,7 +41,7 @@ if __name__ == "__main__":
     parser.add_argument('--semeval_root', help="folder containing semeval data", default="/home/dfried/code/semeval")
     args = parser.parse_args()
 
-    classifier, ngram_reader = load_classifier_and_ngrams(args.model)
+    classifier, ngram_reader = load_model_and_ngrams(args.model)
     analogy_fn, choose_best = make_analogy_fns(classifier, ngram_reader)
 
     def semeval_path(suffix):

@@ -8,7 +8,7 @@ from nltk.corpus import wordnet
 import pandas
 import cPickle
 
-def test_nlm(vocab_size, dimensions, synset_dimensions, n_hidden, ngram_reader, rng=None, synset_sampling_rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None, update_related_weight=1.0):
+def test_nlm(vocab_size, dimensions, synset_dimensions, n_hidden, ngram_reader, rng=None, synset_sampling_rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None, update_related_weight=1.0, take_top_synset=False):
     print '... building the model'
 
     if rng is None:
@@ -33,7 +33,10 @@ def test_nlm(vocab_size, dimensions, synset_dimensions, n_hidden, ngram_reader, 
         if not possible_synsets:
             return 0
         else:
-            choice = synset_sampling_rng.randint(len(possible_synsets))
+            if take_top_synset:
+                choice = 0
+            else:
+                choice = synset_sampling_rng.randint(len(possible_synsets))
             return synset_to_id[possible_synsets[choice]]
 
     def sample_synsets(word_symbol_sequence):
@@ -173,6 +176,7 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate', type=float, help="L2 regularization constant", default=0.01)
     parser.add_argument('--train_proportion', type=float, help="percentage of data to use as training", default=0.95)
     parser.add_argument('--test_proportion', type=float, help="percentage of data to use as testing", default=None)
+    parser.add_argument('--take_top_synset', action='store_true', help="don't sample synsets, choose the most likely")
     parser.add_argument('--save_model_frequency', type=int, help="save model every nth iteration", default=10)
     parser.add_argument('--stats_output_file', type=str, help="save stats to this file")
     parser.add_argument('--update_related_weight', type=float, help="scale of updates to words in same synset as replaced and replacement words")
@@ -196,6 +200,7 @@ if __name__ == '__main__':
         'stats_output_file': args.stats_output_file,
         'save_model_frequency': args.save_model_frequency,
         'update_related_weight': args.update_related_weight,
+        'take_top_synset': args.take_top_synset,
     }
     other_params = {
         'ngram_filename': args.ngram_filename,

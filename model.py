@@ -177,16 +177,8 @@ class NLM(object):
             return self._word_to_symbol
         except AttributeError:
             self._word_to_symbol = defaultdict(int, dict((word, index)
-                                                         for index, word in enumerate(self._get_vocabulary(), 1)))
+                                                         for index, word in enumerate(self._get_vocabulary())))
             return self._word_to_symbol
-
-    @property
-    def symbol_to_word(self):
-        try:
-            return self._symbol_to_word
-        except AttributeError:
-            self._symbol_to_word = defaultdict(lambda : '*UNKNOWN*', dict(enumerate(self._get_vocabulary(), 1)))
-            return self._symbol_to_word
 
     @property
     def symbol_to_synset(self):
@@ -195,6 +187,15 @@ class NLM(object):
         except AttributeError:
             self._symbol_to_synset = dict(enumerate(self.synsets, 1))
             return self._symbol_to_synset
+
+    @property
+    def symbol_to_word(self):
+        try:
+            return self._symbol_to_word
+        except AttributeError:
+            self._symbol_to_word = defaultdict(lambda : '*UNKNOWN*', dict(enumerate(self._get_vocabulary())))
+            self._symbol_to_word[0] = '*UNKNOWN*'
+            return self._symbol_to_word
 
     def _build_layers(self):
         self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,

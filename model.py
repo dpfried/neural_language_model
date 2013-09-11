@@ -1,6 +1,7 @@
 import theano
 import theano.tensor as T
 import numpy as np
+from utils import grouper
 
 # code adapted from DeepLearning tutorial:
 # deeplearning.net/tutorial/mlp.html
@@ -125,7 +126,7 @@ class HiddenLayer(object):
         return self.activation(T.dot(input, self.W) + self.b)
 
 class NLM(object):
-    def __init__(self, rng, vocabulary, dimensions, sequence_length, n_hidden, L1_reg, L2_reg, other_params=None):
+    def __init__(self, rng, vocabulary, synsets, dimensions, synset_dimensions, sequence_length, n_hidden, L1_reg, L2_reg, other_params=None):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -140,6 +141,10 @@ class NLM(object):
         self.other_params = other_params
         self.blocks_trained = 0
 
+        self.synsets = synsets
+        self.synsets_size = len(synsets)
+        self.synset_dimensions = synset_dimensions
+
         self._build_layers()
         self._build_functions()
 
@@ -148,8 +153,12 @@ class NLM(object):
                                               dimensions=self.dimensions,
                                               sequence_length=self.sequence_length)
 
+        self.synset_embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.synsets_size,
+                                                      dimensions=self.synset_dimensions,
+                                                      sequence_length=self.sequence_length)
+
         self.hidden_layer = HiddenLayer(rng=self.rng,
-                                        n_in=self.dimensions * self.sequence_length,
+                                        n_in=(self.dimensions + self.synset_dimensions) * self.sequence_length,
                                         n_out=self.n_hidden,
                                         activation=T.nnet.sigmoid)
 
@@ -160,9 +169,6 @@ class NLM(object):
         self.L1 = abs(self.hidden_layer.W).sum() + abs(self.output_layer.W).sum()
 
         self.L2_sqr = (self.hidden_layer.W ** 2).sum() + (self.output_layer.W ** 2).sum()
-
-        # connect the computation graph together from input to regularized cost
-        # function
 
     def score_symbolic(self, sequence_embedding):
         return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, sequence_embedding)
@@ -179,8 +185,11 @@ class NLM(object):
         correct_embeddings = [T.vector(name='correct_embedding%i' % i) for i in range(self.sequence_length)]
         error_embeddings = [T.vector(name='error_embedding%i' % i) for i in range(self.sequence_length)]
 
-        correct_sequence_embedding = self.embedding_layer.flatten_embeddings(correct_embeddings)
-        error_sequence_embedding = self.embedding_layer.flatten_embeddings(error_embeddings)
+        correct_synset_embeddings = [T.vector(name='correct_synset_embedding%i' % i) for i in range(self.sequence_length)]
+        error_synset_embeddings = [T.vector(name='error_synset_embedding%i' % i) for i in range(self.sequence_length)]
+
+        correct_sequence_embedding = self.embedding_layer.flatten_embeddings(correct_embeddings + correct_synset_embeddings)
+        error_sequence_embedding = self.embedding_layer.flatten_embeddings(error_embeddings + error_synset_embeddings)
 
         cost = self.compare_symbolic(correct_sequence_embedding, error_sequence_embedding) + self.L1_reg * self.L1 + self.L2_reg * self.L2_sqr
 
@@ -193,39 +202,52 @@ class NLM(object):
         dcorrect_embeddings = T.grad(cost, correct_embeddings)
         derror_embeddings = T.grad(cost, error_embeddings)
 
-        inputs = correct_embeddings + error_embeddings + [weighted_learning_rate]
+        dcorrect_synset_embeddings= T.grad(cost, correct_synset_embeddings)
+        derror_synset_embeddings = T.grad(cost, error_synset_embeddings)
+
+        inputs = correct_embeddings + error_embeddings + correct_synset_embeddings + error_synset_embeddings + [weighted_learning_rate]
+        outputs = dcorrect_embeddings + derror_embeddings + dcorrect_synset_embeddings + derror_synset_embeddings + [cost]
 
         self.training_function = theano.function(inputs=inputs,
-                                                 outputs=dcorrect_embeddings + derror_embeddings + [cost],
+                                                 outputs=outputs,
                                                  updates=updates)
 
         embeddings = [T.vector(name='embedding%i' % i) for i in range(self.sequence_length)]
+        synset_embeddings = [T.vector(name='synset_embedding%i' % i) for i in range(self.sequence_length)]
 
-        self.score_ngram = theano.function(inputs=embeddings,
-                                           outputs=self.score_symbolic(self.embedding_layer.flatten_embeddings(embeddings)))
+        self.score_ngram = theano.function(inputs=embeddings + synset_embeddings,
+                                           outputs=self.score_symbolic(self.embedding_layer.flatten_embeddings(embeddings + synset_embeddings)))
 
-    def train(self, correct_sequence, error_sequence, weighted_learning_rate=0.01):
+    def train(self, correct_sequence, error_sequence, correct_synset_sequence, error_synset_sequence, weighted_learning_rate=0.01):
         correct_embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in correct_sequence]
         error_embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in error_sequence]
 
-        outputs = self.training_function(*(correct_embeddings + error_embeddings + [weighted_learning_rate]))
+        correct_synset_embeddings = [self.synset_embedding_layer.embeddings_from_symbols(i) for i in correct_synset_sequence]
+        error_synset_embeddings = [self.synset_embedding_layer.embeddings_from_symbols(i) for i in error_synset_sequence]
 
-        correct_grads = outputs[:self.sequence_length]
-        error_grads = outputs[self.sequence_length:-1]
+        outputs = self.training_function(*(correct_embeddings + error_embeddings + correct_synset_embeddings + error_synset_embeddings + [weighted_learning_rate]))
+
+        correct_grads, error_grads, correct_synset_grads, error_synset_grads = list(grouper(self.sequence_length, outputs))[:4]
 
         cost = outputs[-1]
 
         correct_updates = -weighted_learning_rate * np.array(correct_grads)
         error_updates = -weighted_learning_rate * np.array(error_grads)
 
+        correct_synset_updates = -weighted_learning_rate * np.array(correct_synset_grads)
+        error_synset_updates = -weighted_learning_rate * np.array(error_synset_grads)
+
         self.embedding_layer.update_embeddings(correct_sequence, correct_updates)
         self.embedding_layer.update_embeddings(error_sequence, error_updates)
+        self.synset_embedding_layer.update_embeddings(correct_synset_sequence, correct_synset_updates)
+        self.synset_embedding_layer.update_embeddings(error_synset_sequence, error_synset_updates)
 
-        return cost, correct_updates, error_updates
+        return cost, correct_updates, error_updates, correct_synset_updates, error_synset_updates
 
-    def score(self, sequence):
+    def score(self, sequence, synset_sequence):
         embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in sequence]
-        return self.score_ngram(*embeddings)
+        synset_embeddings = [self.synset_embedding_layer.embeddings_from_symbols(i) for i in sequence]
+        return self.score_ngram(*(embeddings + synset_embeddings))
 
     def dump_embeddings(self, filename, index_to_word, normalize=True, precision=8):
         format_str = '%%0.%if' % precision

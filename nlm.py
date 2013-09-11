@@ -4,34 +4,18 @@ import time
 import sys
 from ngrams import NgramReader
 from utils import sample_cumulative_discrete_distribution
-from wordnet_similarity import pairwise_similarity
 from nltk.corpus import wordnet
 import pandas
-import synset_distances
 import cPickle
 
-def similarities(model, semantic_similarity_fn, correct_symbol, error_symbol, **kwargs):
-    # get the word embeddings corresponding to the target word in correct and
-    # corrupted ngrams from the model
-    correct_embedding = model.embedding_layer.embedding[correct_symbol]
-    error_embedding = model.embedding_layer.embedding[error_symbol]
-
-    # get the cosine similarity of the two word embeddings
-    embedding_similarity = np.dot(correct_embedding, error_embedding) / (np.linalg.norm(correct_embedding, 2) * np.linalg.norm(error_embedding, 2))
-
-    # get the lch_similarity from paths
-    correct_word = model.vocabulary[correct_symbol]
-    error_word = model.vocabulary[error_symbol]
-    semantic_similarity = pairwise_similarity(wordnet.synsets(correct_word), wordnet.synsets(error_word), similarity_fn=semantic_similarity_fn, **kwargs)
-
-    return embedding_similarity, semantic_similarity
-
-
-def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None, update_related_weight=1.0):
+def test_nlm(vocab_size, dimensions, synset_dimensions, n_hidden, ngram_reader, rng=None, synset_sampling_rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None, update_related_weight=1.0):
     print '... building the model'
 
     if rng is None:
         rng = np.random.RandomState(1234)
+
+    if synset_sampling_rng is None:
+        synset_sampling_rng = np.random.RandomState(1234)
 
     sequence_length = ngram_reader.ngram_length
     vocabulary = ngram_reader.word_array[:vocab_size]
@@ -39,17 +23,29 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
     id_to_word = dict(enumerate(vocabulary))
     word_to_id = dict((word, index) for (index, word) in enumerate(vocabulary))
 
-    # build a map from synsets to all words contained in that synset (ignoring
-    # the unknown word at index 0)
-    synsets_to_words = synset_distances.synsets_to_words(vocabulary[1:])
+    synsets = ['NONE'] + list(wordnet.all_synsets())
 
-    def symbols_related_to(symbol):
-        return [word_to_id[word]
-                for word in synset_distances.get_related_words(id_to_word[symbol], synsets_to_words)]
+    id_to_synset = dict(enumerate(synsets))
+    synset_to_id = dict((synset, index) for (index, synset) in enumerate(synsets))
+
+    def sample_synset(word_symbol):
+        possible_synsets = wordnet.synsets(id_to_word[word_symbol])
+        if not possible_synsets:
+            return 0
+        else:
+            choice = synset_sampling_rng.randint(len(possible_synsets))
+            return synset_to_id[possible_synsets[choice]]
+
+    def sample_synsets(word_symbol_sequence):
+        """given an ngram of word indices, uniformly sample a synset for each
+        word and then return a list of the indices of these symbols"""
+        return [sample_synset(word_symbol) for word_symbol in word_symbol_sequence]
 
     nlm_model = NLM(rng=rng,
                     vocabulary=vocabulary,
+                    synsets=synsets,
                     dimensions=dimensions,
+                    synset_dimensions=synset_dimensions,
                     sequence_length=sequence_length,
                     n_hidden=n_hidden,
                     L1_reg=L1_reg,
@@ -79,7 +75,6 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
         error_symbols = ngram_reader.add_noise_to_symbols(correct_symbols, column_index=replacement_column_index, rng=rng)
         return correct_symbols, error_symbols, ngram_frequency
 
-
     last_time = time.clock()
     block_count = 0
     block_test_frequency = 1
@@ -104,22 +99,11 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
                 sys.stdout.flush()
             train_index = sample_cumulative_discrete_distribution(training_block[:,-1])
             correct_symbols, error_symbols, ngram_frequency = process_data_row(training_block[train_index])
+            correct_synset_symbols = sample_synsets(correct_symbols)
+            error_synset_symbols = sample_synsets(error_symbols)
             # calculate the weight as a function of the correct symbols and error symbols
-            cost, correct_updates, error_updates = nlm_model.train(correct_symbols, error_symbols, learning_rate) # * ngram_frequency
+            cost, correct_updates, error_updates, correct_synset_updates, error_synset_updates = nlm_model.train(correct_symbols, error_symbols, correct_synset_symbols, error_synset_symbols, learning_rate) # * ngram_frequency
             costs.append(cost)
-
-            # now update related words to the correct and error embeddings
-            # (those in the same synset)
-
-            correct_update = correct_updates[replacement_column_index]
-            error_update = error_updates[replacement_column_index]
-
-            correct_symbol = correct_symbols[replacement_column_index]
-            error_symbol = error_symbols[replacement_column_index]
-            if correct_symbol != 0:
-                nlm_model.embedding_layer.update_embeddings(symbols_related_to(correct_symbol), update_related_weight * correct_update)
-            if error_symbol != 0:
-                nlm_model.embedding_layer.update_embeddings(symbols_related_to(error_symbol), update_related_weight * error_update)
 
         this_training_cost = np.mean(costs)
         # so that when we pickle the model we have a record of how many blocks
@@ -135,7 +119,9 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
                     sys.stdout.write('\rtesting instance %d of %d (%f %%)\r' % (test_index, n_test_instances, 100. * test_index / n_test_instances))
                     sys.stdout.flush()
                 correct_symbols, error_symbols, ngram_frequency = process_data_row(testing_block[test_index])
-                test_values.append(nlm_model.score(correct_symbols) - nlm_model.score(error_symbols))
+                correct_synset_symbols = sample_synsets(correct_symbols)
+                error_synset_symbols = sample_synsets(error_symbols)
+                test_values.append(nlm_model.score(correct_symbols, correct_synset_symbols) - nlm_model.score(error_symbols, error_synset_symbols))
                 test_frequencies.append(ngram_frequency)
             test_mean = np.mean(test_values)
             stats_for_block['test_mean'] = test_mean
@@ -180,6 +166,7 @@ if __name__ == '__main__':
     parser.add_argument('--vocab_size', type=int, help="number of top words to include", default=5000)
     parser.add_argument('--rng_seed', type=int, help="random number seed", default=1234)
     parser.add_argument('--dimensions', type=int, help="dimension of word representations", default=20)
+    parser.add_argument('--synset_dimensions', type=int, help="dimension of synset representations", default=20)
     parser.add_argument('--n_hidden', type=int, help="number of hidden nodes", default=30)
     parser.add_argument('--L1_reg', type=float, help="L1 regularization constant", default=0.0)
     parser.add_argument('--L2_reg', type=float, help="L2 regularization constant", default=0.0)
@@ -199,6 +186,7 @@ if __name__ == '__main__':
         'rng':rng,
         'vocab_size':ngram_reader.vocab_size,
         'dimensions':args.dimensions,
+        'synset_dimensions':args.synset_dimensions,
         'n_hidden':args.n_hidden,
         'L1_reg':args.L1_reg,
         'L2_reg':args.L2_reg,

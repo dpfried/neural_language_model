@@ -1,7 +1,7 @@
 # coding: utf-8
 import cPickle
 import numpy as np
-from scipy.spatial.distance import pdist, squareform, cdist
+from scipy.spatial.distance import pdist, cosine
 import gzip
 import ngrams
 from collections import defaultdict
@@ -23,17 +23,12 @@ def maps(ngram_reader):
     return id_map, reverse_map
 
 def cosine_similarity(a, b):
-    return np.dot(a, b) / np.sqrt(np.dot(a, a) * np.dot(b,b))
+    return 1 - cosine(a, b)
 
-def make_analogy_fns(classifier, ngram_reader):
-    id_map, reverse_map = maps(ngram_reader)
-    E = classifier.embedding_layer.embedding
+def make_analogy_fns(model, include_synsets=None, normalize_components=False):
     def analogy_fn(word1, word2):
-        if word1 not in id_map:
-            print "warning: %s not in vocabulary" % word1
-        if word2 not in id_map:
-            print "warning: %s not in vocabulary" % word2
-        return E[id_map[word2]] - E[id_map[word1]]
+        return model.get_embedding(word2, include_synsets, normalize_components) - \
+                model.get_embedding(word1, include_synsets, normalize_components)
     def choose_best(reference_analogy, other_pairs):
         # reference_analogy = analogy_fn(word1, word2)
         other_analogies = [analogy_fn(w1, w2) for (w1, w2) in other_pairs]
@@ -47,19 +42,8 @@ def top_indices_from_distances(distances, reverse_map, n=10):
     print top_indices
     return [(reverse_map[i], distances[i]) for i in top_indices]
 
-def make_query_fn(classifier, ngram_reader):
-    embeddings = classifier.embedding_layer.embedding
-    dist_matrix = squareform(pdist(embeddings, 'cosine'))
-    id_map, reverse_map = maps(ngram_reader)
-
-    def query(word, n=10):
-        if word not in id_map:
-            raise Exception('%s not in vocabulary' % word)
-        index = id_map[word]
-        return top_indices_from_distances(dist_matrix[index,:], reverse_map, n=n)
-    return query
-
-def query(classifier, ngram_reader, word, n=10):
+def query(model, ngram_reader, word, n=10):
+    # TODO update this to handle synset embeddings
     id_map, reverse_map = maps(ngram_reader)
     if word not in id_map:
         raise Exception('%s not in vocabulary' % word)

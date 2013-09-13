@@ -4,91 +4,51 @@ import time
 import sys
 from ngrams import NgramReader
 from utils import sample_cumulative_discrete_distribution
-from wordnet_similarity import scaled_lch_similarity, pairwise_similarity, WunschPaths
 from nltk.corpus import wordnet
 import pandas
+import cPickle
 
-def similarities(model, semantic_similarity_fn, correct_symbol, error_symbol, **kwargs):
-    # get the word embeddings corresponding to the target word in correct and
-    # corrupted ngrams from the model
-    correct_embedding = model.embedding_layer.embedding[correct_symbol]
-    error_embedding = model.embedding_layer.embedding[error_symbol]
-
-    # get the cosine similarity of the two word embeddings
-    embedding_similarity = np.dot(correct_embedding, error_embedding) / (np.linalg.norm(correct_embedding, 2) * np.linalg.norm(error_embedding, 2))
-
-    # get the lch_similarity from paths
-    correct_word = model.vocabulary[correct_symbol]
-    error_word = model.vocabulary[error_symbol]
-    semantic_similarity = pairwise_similarity(wordnet.synsets(correct_word), wordnet.synsets(error_word), similarity_fn=semantic_similarity_fn, **kwargs)
-
-    return embedding_similarity, semantic_similarity
-
-
-def constant_weight(model, semantic_similarity_fn, replacement_column_index, correct_symbols, error_symbols, alpha_scaling=1.0, embedding_scaling=1.0, semantic_scaling=1.0, **kwargs):
-    correct_symbol = correct_symbols[replacement_column_index]
-    error_symbol = error_symbols[replacement_column_index]
-
-    embedding_similarity, semantic_similarity = similarities(model, semantic_similarity_fn, correct_symbol, error_symbol, **kwargs)
-    return 1, embedding_similarity, semantic_similarity
-
-def semantic_vs_embedding_weight(model, semantic_similarity_fn, replacement_column_index, correct_symbols, error_symbols, alpha_scaling=1.0, embedding_scaling=1.0, semantic_scaling=1.0, **kwargs):
-    """
-    given the NLM (which contains word embeddings) and the index of the word that was corrupted
-    to make the error_symbols from correct_symbols, return the degree by which the cost function
-    should be weighted for this training example
-
-    @type model: L{NLM}
-    @param model: The instance of the NLM, containing the embeddings and vocabulary
-
-    @type semantic_similarity_fn: a function L{Synset} x L{Synset} -> float
-    @param semantic_similarity_fn: function of two synsets that returns a value between
-    -1 and 1 reflecting their similarity, where -1 is least similar and 1 is
-    most similar
-
-    @type replacement_column_index: int
-    @param replacement_column_index: The index of the word that was corrupted
-
-    @type correct_symbols: list of int
-    @param correct_symbols: the correct ngram as a list of indices into model.vocabulary
-
-    @type error_symbols: list of int
-    @param error_symbols: the error ngram as a list of indices into model.vocabulary
-
-    @param kwargs: see wordnet_similarity.pairwise_similarity
-    """
-    correct_symbol = correct_symbols[replacement_column_index]
-    error_symbol = error_symbols[replacement_column_index]
-
-    embedding_similarity, semantic_similarity = similarities(model, semantic_similarity_fn, correct_symbol, error_symbol, **kwargs)
-
-    if correct_symbol != 0 and error_symbol != 0 and semantic_similarity is not None:
-        weight = np.exp(-1.0 * alpha_scaling * (embedding_similarity ** embedding_scaling) * (semantic_similarity ** semantic_scaling))
-    else:
-        weight = 1.0
-    return weight, embedding_similarity, semantic_similarity
-
-def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, weight_fn=constant_weight, save_model_frequency=10, other_params={}, alpha_scaling=1.0, embedding_scaling=1.0, semantic_scaling=1.0, stats_output_file=None):
+def test_nlm(vocab_size, dimensions, synset_dimensions, n_hidden, ngram_reader, rng=None, synset_sampling_rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None, update_related_weight=1.0, take_top_synset=False):
     print '... building the model'
 
     if rng is None:
         rng = np.random.RandomState(1234)
 
+    if synset_sampling_rng is None:
+        synset_sampling_rng = np.random.RandomState(1234)
+
     sequence_length = ngram_reader.ngram_length
     vocabulary = ngram_reader.word_array[:vocab_size]
 
-    # load wordnet shortest paths object (this will take a while)
-    # wordnet_shortest_paths = WunschPaths(wordnet.all_synsets())
-    import cPickle, gzip
-    with gzip.open('paths.pkl.gz', 'rb') as f:
-        wordnet_shortest_paths = cPickle.load(f)
+    id_to_word = dict(enumerate(vocabulary))
+    word_to_id = dict((word, index) for (index, word) in enumerate(vocabulary))
 
-    # create a similarity function from this shortest path object
-    scaled_similarity = lambda synset1, synset2: scaled_lch_similarity(wordnet_shortest_paths, synset1, synset2)
+    synsets = ['NONE'] + list(wordnet.all_synsets())
+
+    id_to_synset = dict(enumerate(synsets))
+    synset_to_id = dict((synset, index) for (index, synset) in enumerate(synsets))
+
+    def sample_synset(word_symbol):
+        possible_synsets = wordnet.synsets(id_to_word[word_symbol])
+        if not possible_synsets:
+            return 0
+        else:
+            if take_top_synset:
+                choice = 0
+            else:
+                choice = synset_sampling_rng.randint(len(possible_synsets))
+            return synset_to_id[possible_synsets[choice]]
+
+    def sample_synsets(word_symbol_sequence):
+        """given an ngram of word indices, uniformly sample a synset for each
+        word and then return a list of the indices of these symbols"""
+        return [sample_synset(word_symbol) for word_symbol in word_symbol_sequence]
 
     nlm_model = NLM(rng=rng,
                     vocabulary=vocabulary,
+                    synsets=synsets,
                     dimensions=dimensions,
+                    synset_dimensions=synset_dimensions,
                     sequence_length=sequence_length,
                     n_hidden=n_hidden,
                     L1_reg=L1_reg,
@@ -118,7 +78,6 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
         error_symbols = ngram_reader.add_noise_to_symbols(correct_symbols, column_index=replacement_column_index, rng=rng)
         return correct_symbols, error_symbols, ngram_frequency
 
-
     last_time = time.clock()
     block_count = 0
     block_test_frequency = 1
@@ -136,9 +95,6 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
         # sample block_size ngrams from the training block, by frequency
         # in the original corpus. Using block_size as the sample size is
         # pretty arbitrary
-        weights = []
-        embedding_similarities = []
-        semantic_similarities = []
         stats_for_block = {}
         for count in xrange(block_size):
             if count % print_freq == 0:
@@ -146,20 +102,11 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
                 sys.stdout.flush()
             train_index = sample_cumulative_discrete_distribution(training_block[:,-1])
             correct_symbols, error_symbols, ngram_frequency = process_data_row(training_block[train_index])
+            correct_synset_symbols = sample_synsets(correct_symbols)
+            error_synset_symbols = sample_synsets(error_symbols)
             # calculate the weight as a function of the correct symbols and error symbols
-            weight, embedding_similarity, semantic_similarity = weight_fn(model=nlm_model,
-                                                                          semantic_similarity_fn=scaled_similarity,
-                                                                          replacement_column_index=replacement_column_index,
-                                                                          correct_symbols=correct_symbols,
-                                                                          error_symbols=error_symbols,
-                                                                          alpha_scaling=alpha_scaling,
-                                                                          embedding_scaling=embedding_scaling,
-                                                                          semantic_scaling=semantic_scaling)
-            weights.append(weight)
-            if semantic_similarity is not None:
-                embedding_similarities.append(embedding_similarity)
-                semantic_similarities.append(semantic_similarity)
-            costs.append(nlm_model.train(correct_symbols, error_symbols, learning_rate * weight))# * ngram_frequency))
+            cost, correct_updates, error_updates, correct_synset_updates, error_synset_updates = nlm_model.train(correct_symbols, error_symbols, correct_synset_symbols, error_synset_symbols, learning_rate) # * ngram_frequency
+            costs.append(cost)
 
         this_training_cost = np.mean(costs)
         # so that when we pickle the model we have a record of how many blocks
@@ -175,7 +122,9 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
                     sys.stdout.write('\rtesting instance %d of %d (%f %%)\r' % (test_index, n_test_instances, 100. * test_index / n_test_instances))
                     sys.stdout.flush()
                 correct_symbols, error_symbols, ngram_frequency = process_data_row(testing_block[test_index])
-                test_values.append(nlm_model.score(correct_symbols) - nlm_model.score(error_symbols))
+                correct_synset_symbols = sample_synsets(correct_symbols)
+                error_synset_symbols = sample_synsets(error_symbols)
+                test_values.append(nlm_model.score(correct_symbols, correct_synset_symbols) - nlm_model.score(error_symbols, error_synset_symbols))
                 test_frequencies.append(ngram_frequency)
             test_mean = np.mean(test_values)
             stats_for_block['test_mean'] = test_mean
@@ -193,32 +142,6 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
         sys.stdout.write('\033[k\r')
         sys.stdout.flush()
         print 'block %i \t training cost %f %% \t test score %s \t test wt score %s \t %f seconds' % (block_count, this_training_cost, test_score_str, test_wt_score_str, current_time - last_time)
-        print 'average weight %f std dev %f' % (np.mean(weights), np.std(weights))
-        if embedding_similarities and semantic_similarities:
-            embedding_sim_mean = np.mean(embedding_similarities)
-            semantic_sim_mean = np.mean(semantic_similarities)
-            cov_mat = np.cov(np.row_stack([embedding_similarities, semantic_similarities]))
-            embedding_sim_std = np.sqrt(cov_mat[0,0])
-            semantic_sim_std = np.sqrt(cov_mat[1,1])
-            correlation_coeff = cov_mat[0,1] / (embedding_sim_std * semantic_sim_std)
-
-            stats_for_block['embedding_sim_mean'] = embedding_sim_mean
-            stats_for_block['embedding_sim_max'] = np.max(embedding_similarities)
-            stats_for_block['embedding_sim_min'] = np.min(embedding_similarities)
-            stats_for_block['embedding_sim_std'] = embedding_sim_std
-
-            stats_for_block['semantic_sim_mean'] = semantic_sim_mean
-            stats_for_block['semantic_sim_max'] = np.max(semantic_similarities)
-            stats_for_block['semantic_sim_min'] = np.min(semantic_similarities)
-            stats_for_block['semantic_sim_std'] = semantic_sim_std
-
-            stats_for_block['correlation_coeff'] = correlation_coeff
-
-            print 'average embedding sim %f std dev %f' % (embedding_sim_mean, embedding_sim_std)
-            print 'average semantic sim %f std dev %f' % (semantic_sim_mean, semantic_sim_std)
-            print 'correlation coeff %f' % (correlation_coeff)
-        else:
-            print 'no similarities'
         last_time = current_time
 
         all_stats = pandas.concat([all_stats, pandas.DataFrame(stats_for_block, index=[block_count])])
@@ -240,28 +163,23 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
 if __name__ == '__main__':
     import argparse
     import gzip
-    weight_functions = {
-        'constant': constant_weight,
-        'sve': semantic_vs_embedding_weight,
-    }
     parser = argparse.ArgumentParser()
     parser.add_argument('--ngram_filename', help="hdf5 file to load ngrams from")
     parser.add_argument('--model_basename', help="basename to write model to")
     parser.add_argument('--vocab_size', type=int, help="number of top words to include", default=5000)
     parser.add_argument('--rng_seed', type=int, help="random number seed", default=1234)
     parser.add_argument('--dimensions', type=int, help="dimension of word representations", default=20)
+    parser.add_argument('--synset_dimensions', type=int, help="dimension of synset representations", default=20)
     parser.add_argument('--n_hidden', type=int, help="number of hidden nodes", default=30)
     parser.add_argument('--L1_reg', type=float, help="L1 regularization constant", default=0.0)
     parser.add_argument('--L2_reg', type=float, help="L2 regularization constant", default=0.0)
     parser.add_argument('--learning_rate', type=float, help="L2 regularization constant", default=0.01)
     parser.add_argument('--train_proportion', type=float, help="percentage of data to use as training", default=0.95)
     parser.add_argument('--test_proportion', type=float, help="percentage of data to use as testing", default=None)
-    parser.add_argument('--weight_fn', type=str, help="weight function to use (%s)" % ' or '.join(weight_functions.keys()), default='constant')
-    parser.add_argument('--alpha_scaling', type=float, help="exponential multiplier on weight function", default=1.0)
-    parser.add_argument('--embedding_scaling', type=float, help="exponential multiplier on embedding similarity in weight function", default=1.0)
-    parser.add_argument('--semantic_scaling', type=float, help="exponential multiplier on semantic similarity in weight function", default=1.0)
+    parser.add_argument('--take_top_synset', action='store_true', help="don't sample synsets, choose the most likely")
     parser.add_argument('--save_model_frequency', type=int, help="save model every nth iteration", default=10)
     parser.add_argument('--stats_output_file', type=str, help="save stats to this file")
+    parser.add_argument('--update_related_weight', type=float, help="scale of updates to words in same synset as replaced and replacement words")
     args = parser.parse_args()
 
     ngram_reader = NgramReader(args.ngram_filename, vocab_size=args.vocab_size, train_proportion=args.train_proportion, test_proportion=args.test_proportion)
@@ -272,18 +190,17 @@ if __name__ == '__main__':
         'rng':rng,
         'vocab_size':ngram_reader.vocab_size,
         'dimensions':args.dimensions,
+        'synset_dimensions':args.synset_dimensions,
         'n_hidden':args.n_hidden,
         'L1_reg':args.L1_reg,
         'L2_reg':args.L2_reg,
         'save_model_basename':args.model_basename,
         'learning_rate': args.learning_rate,
         'blocks_to_run':np.inf,
-        'weight_fn': weight_functions[args.weight_fn],
         'stats_output_file': args.stats_output_file,
         'save_model_frequency': args.save_model_frequency,
-        'alpha_scaling': args.alpha_scaling,
-        'embedding_scaling': args.embedding_scaling,
-        'semantic_scaling': args.semantic_scaling,
+        'update_related_weight': args.update_related_weight,
+        'take_top_synset': args.take_top_synset,
     }
     other_params = {
         'ngram_filename': args.ngram_filename,

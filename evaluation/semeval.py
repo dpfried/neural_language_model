@@ -4,7 +4,9 @@ import os
 from glob import glob
 import numpy as np
 import sys
-from query import load_classifier_and_ngrams,  make_analogy_fns
+from query import load_model_and_ngrams,  make_analogy_fns
+import gzip, cPickle
+import tempfile
 
 def attr_dict(filename):
     with open(filename) as f:
@@ -32,20 +34,15 @@ def get_examples(answer_file):
     with open(answer_file) as f:
         return [line.lower().strip().strip('"').split(':') for line in f]
 
+def run(model, include_synsets, normalize_components, semeval_root):
+    analogy_fn, choose_best = make_analogy_fns(model,
+                                               include_synsets=include_synsets,
+                                               normalize_components=normalize_components)
 
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('model', help="model file to be used for semeval.py script")
-    parser.add_argument('output_folder', help="folder to write results to")
-    parser.add_argument('--semeval_root', help="folder containing semeval data", default="/home/dfried/code/semeval")
-    args = parser.parse_args()
-
-    classifier, ngram_reader = load_classifier_and_ngrams(args.model)
-    analogy_fn, choose_best = make_analogy_fns(classifier, ngram_reader)
+    output_folder = tempfile.mkdtemp()
 
     def semeval_path(suffix):
-        return os.path.join(args.semeval_root, suffix)
+        return os.path.join(semeval_root, suffix)
 
     sets_by_folder = {
         # semeval_path('Training'): "10a 1a 2c 2h 3a 3c 4c 5d 5i 7a".split(),
@@ -53,19 +50,19 @@ if __name__ == "__main__":
     }
 
     def nlm_scaled_path(suffix):
-        return os.path.join(args.output_folder, 'ModelScaled-%s.txt' % suffix)
+        return os.path.join(output_folder, 'ModelScaled-%s.txt' % suffix)
 
     def turker_scaled_path(suffix):
-        return os.path.join(args.output_folder, 'TurkerScaled-%s.txt' % suffix)
+        return os.path.join(output_folder, 'TurkerScaled-%s.txt' % suffix)
 
     def spearman_results_path(suffix):
-        return os.path.join(args.output_folder, 'SpearmanResults-%s.txt' % suffix)
+        return os.path.join(output_folder, 'SpearmanResults-%s.txt' % suffix)
 
     def maxdiff_scaled_path(suffix):
-        return os.path.join(args.output_folder, 'MaxDiff-%s.txt' % suffix)
+        return os.path.join(output_folder, 'MaxDiff-%s.txt' % suffix)
 
     def maxdiff_results_path(suffix):
-        return os.path.join(args.output_folder, 'MaxDiffResults-%s.txt' % suffix)
+        return os.path.join(output_folder, 'MaxDiffResults-%s.txt' % suffix)
 
     for semeval_data_folder, sets_to_run in sets_by_folder.items():
         # only test on testing
@@ -115,9 +112,34 @@ if __name__ == "__main__":
 
     # compute average correlation
     corrs = [parse_correlation(filename) for filename in glob(spearman_results_path('*'))]
-
     # compute average accuracy
     accuracy = [parse_accuracy(filename) for filename in glob(maxdiff_results_path('*'))]
 
-    print 'average correlation: %f' % np.mean(corrs)
-    print 'average accuracy: %f' % np.mean(accuracy)
+    return np.mean(corrs), np.mean(accuracy)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('model', help="model file to be used for semeval.py script")
+    parser.add_argument('--all_synsets', action='store_true',)
+    parser.add_argument('--top_synset', action='store_true',)
+    parser.add_argument('--normalize_components', action='store_true',)
+    # parser.add_argument('--output_folder', help="folder to write results to", default="/home/dfried/code/nlm/semeval/junk")
+    parser.add_argument('--semeval_root', help="folder containing semeval data", default="/home/dfried/code/semeval")
+    args = parser.parse_args()
+
+    with gzip.open(args.model) as f:
+        model = cPickle.load(f)
+
+    if args.all_synsets:
+        include_synsets='all'
+    elif args.top_synset:
+        include_synsets='top'
+    else:
+        include_synsets=None
+
+    mean_cor, mean_acc = run(model, include_synsets, args.normalize_components, args.semeval_root)
+
+    print 'average correlation: %f' % mean_cor
+    print 'average accuracy: %f' % mean_acc

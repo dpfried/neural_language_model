@@ -1,6 +1,10 @@
 import theano
 import theano.tensor as T
 import numpy as np
+from utils import grouper
+from nltk.corpus import wordnet as wn
+from collections import defaultdict
+import numpy as np
 
 # code adapted from DeepLearning tutorial:
 # deeplearning.net/tutorial/mlp.html
@@ -125,8 +129,10 @@ class HiddenLayer(object):
         return self.activation(T.dot(input, self.W) + self.b)
 
 class NLM(object):
-    def __init__(self, rng, vocabulary, dimensions, sequence_length, n_hidden, L1_reg, L2_reg, other_params={}):
+    def __init__(self, rng, vocabulary, synsets, dimensions, synset_dimensions, sequence_length, n_hidden, L1_reg, L2_reg, other_params=None):
         # initialize parameters
+        if other_params is None:
+            other_params = {}
         self.rng = rng
         self.vocabulary = vocabulary
         self.vocab_size = len(vocabulary)
@@ -138,16 +144,70 @@ class NLM(object):
         self.other_params = other_params
         self.blocks_trained = 0
 
+        self.synsets = synsets
+        self.synsets_size = len(synsets)
+        self.synset_dimensions = synset_dimensions
+
         self._build_layers()
         self._build_functions()
+
+    # this is ugly, use it because we didn't always save the vocab
+    def _get_vocabulary(self):
+        try:
+            return self.vocabulary
+        except:
+            import ngrams
+            ngram_reader = ngrams.NgramReader(self.other_params['ngram_filename'], vocab_size=self.vocab_size)
+            self.vocabulary = ngram_reader.word_array
+            return self.vocabulary
+
+    @property
+    def synset_to_symbol(self):
+        try:
+            return self._synset_to_symbol
+        except AttributeError:
+            self._synset_to_symbol = defaultdict(int, dict((synset, index)
+                                                           for index, synset in enumerate(self.synsets, 1)))
+            self._synset_to_symbol['NONE'] = 0
+            return self._synset_to_symbol
+
+    @property
+    def word_to_symbol(self):
+        try:
+            return self._word_to_symbol
+        except AttributeError:
+            self._word_to_symbol = defaultdict(int, dict((word, index)
+                                                         for index, word in enumerate(self._get_vocabulary())))
+            return self._word_to_symbol
+
+    @property
+    def symbol_to_synset(self):
+        try:
+            return self._symbol_to_synset
+        except AttributeError:
+            self._symbol_to_synset = dict(enumerate(self.synsets, 1))
+            return self._symbol_to_synset
+
+    @property
+    def symbol_to_word(self):
+        try:
+            return self._symbol_to_word
+        except AttributeError:
+            self._symbol_to_word = defaultdict(lambda : '*UNKNOWN*', dict(enumerate(self._get_vocabulary())))
+            self._symbol_to_word[0] = '*UNKNOWN*'
+            return self._symbol_to_word
 
     def _build_layers(self):
         self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,
                                               dimensions=self.dimensions,
                                               sequence_length=self.sequence_length)
 
+        self.synset_embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.synsets_size,
+                                                      dimensions=self.synset_dimensions,
+                                                      sequence_length=self.sequence_length)
+
         self.hidden_layer = HiddenLayer(rng=self.rng,
-                                        n_in=self.dimensions * self.sequence_length,
+                                        n_in=(self.dimensions + self.synset_dimensions) * self.sequence_length,
                                         n_out=self.n_hidden,
                                         activation=T.nnet.sigmoid)
 
@@ -159,26 +219,26 @@ class NLM(object):
 
         self.L2_sqr = (self.hidden_layer.W ** 2).sum() + (self.output_layer.W ** 2).sum()
 
-        # connect the computation graph together from input to regularized cost
-        # function
-
     def score_symbolic(self, sequence_embedding):
         return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, sequence_embedding)
 
-    # def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding):
-    #     return T.clip(1 - self.score_symbolic(correct_sequence_embedding) + self.score_symbolic(error_sequence_embedding), 0, np.inf)
+    def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding):
+        return T.clip(1 - self.score_symbolic(correct_sequence_embedding) + self.score_symbolic(error_sequence_embedding), 0, np.inf)
 
-    def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding, logistic_scaling_factor=1.0):
-        score_difference = self.score_symbolic(correct_sequence_embedding) - self.score_symbolic(error_sequence_embedding)
-        return T.log(1 + T.exp(logistic_scaling_factor * -1 * score_difference))
+    # def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding, logistic_scaling_factor=1.0):
+    #     score_difference = self.score_symbolic(correct_sequence_embedding) - self.score_symbolic(error_sequence_embedding)
+    #     return T.log(1 + T.exp(logistic_scaling_factor * -1 * score_difference))
 
     def _build_functions(self):
         # create symbolic variables for correct and error input
         correct_embeddings = [T.vector(name='correct_embedding%i' % i) for i in range(self.sequence_length)]
         error_embeddings = [T.vector(name='error_embedding%i' % i) for i in range(self.sequence_length)]
 
-        correct_sequence_embedding = self.embedding_layer.flatten_embeddings(correct_embeddings)
-        error_sequence_embedding = self.embedding_layer.flatten_embeddings(error_embeddings)
+        correct_synset_embeddings = [T.vector(name='correct_synset_embedding%i' % i) for i in range(self.sequence_length)]
+        error_synset_embeddings = [T.vector(name='error_synset_embedding%i' % i) for i in range(self.sequence_length)]
+
+        correct_sequence_embedding = self.embedding_layer.flatten_embeddings(correct_embeddings + correct_synset_embeddings)
+        error_sequence_embedding = self.embedding_layer.flatten_embeddings(error_embeddings + error_synset_embeddings)
 
         cost = self.compare_symbolic(correct_sequence_embedding, error_sequence_embedding) + self.L1_reg * self.L1 + self.L2_reg * self.L2_sqr
 
@@ -191,39 +251,52 @@ class NLM(object):
         dcorrect_embeddings = T.grad(cost, correct_embeddings)
         derror_embeddings = T.grad(cost, error_embeddings)
 
-        inputs = correct_embeddings + error_embeddings + [weighted_learning_rate]
+        dcorrect_synset_embeddings= T.grad(cost, correct_synset_embeddings)
+        derror_synset_embeddings = T.grad(cost, error_synset_embeddings)
+
+        inputs = correct_embeddings + error_embeddings + correct_synset_embeddings + error_synset_embeddings + [weighted_learning_rate]
+        outputs = dcorrect_embeddings + derror_embeddings + dcorrect_synset_embeddings + derror_synset_embeddings + [cost]
 
         self.training_function = theano.function(inputs=inputs,
-                                                 outputs=dcorrect_embeddings + derror_embeddings + [cost],
+                                                 outputs=outputs,
                                                  updates=updates)
 
         embeddings = [T.vector(name='embedding%i' % i) for i in range(self.sequence_length)]
+        synset_embeddings = [T.vector(name='synset_embedding%i' % i) for i in range(self.sequence_length)]
 
-        self.score_ngram = theano.function(inputs=embeddings,
-                                           outputs=self.score_symbolic(self.embedding_layer.flatten_embeddings(embeddings)))
+        self.score_ngram = theano.function(inputs=embeddings + synset_embeddings,
+                                           outputs=self.score_symbolic(self.embedding_layer.flatten_embeddings(embeddings + synset_embeddings)))
 
-    def train(self, correct_sequence, error_sequence, weighted_learning_rate=0.01):
+    def train(self, correct_sequence, error_sequence, correct_synset_sequence, error_synset_sequence, weighted_learning_rate=0.01):
         correct_embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in correct_sequence]
         error_embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in error_sequence]
 
-        outputs = self.training_function(*(correct_embeddings + error_embeddings + [weighted_learning_rate]))
+        correct_synset_embeddings = [self.synset_embedding_layer.embeddings_from_symbols(i) for i in correct_synset_sequence]
+        error_synset_embeddings = [self.synset_embedding_layer.embeddings_from_symbols(i) for i in error_synset_sequence]
 
-        correct_grads = outputs[:self.sequence_length]
-        error_grads = outputs[self.sequence_length:-1]
+        outputs = self.training_function(*(correct_embeddings + error_embeddings + correct_synset_embeddings + error_synset_embeddings + [weighted_learning_rate]))
+
+        correct_grads, error_grads, correct_synset_grads, error_synset_grads = list(grouper(self.sequence_length, outputs))[:4]
 
         cost = outputs[-1]
 
         correct_updates = -weighted_learning_rate * np.array(correct_grads)
         error_updates = -weighted_learning_rate * np.array(error_grads)
 
+        correct_synset_updates = -weighted_learning_rate * np.array(correct_synset_grads)
+        error_synset_updates = -weighted_learning_rate * np.array(error_synset_grads)
+
         self.embedding_layer.update_embeddings(correct_sequence, correct_updates)
         self.embedding_layer.update_embeddings(error_sequence, error_updates)
+        self.synset_embedding_layer.update_embeddings(correct_synset_sequence, correct_synset_updates)
+        self.synset_embedding_layer.update_embeddings(error_synset_sequence, error_synset_updates)
 
-        return cost
+        return cost, correct_updates, error_updates, correct_synset_updates, error_synset_updates
 
-    def score(self, sequence):
+    def score(self, sequence, synset_sequence):
         embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in sequence]
-        return self.score_ngram(*embeddings)
+        synset_embeddings = [self.synset_embedding_layer.embeddings_from_symbols(i) for i in sequence]
+        return self.score_ngram(*(embeddings + synset_embeddings))
 
     def dump_embeddings(self, filename, index_to_word, normalize=True, precision=8):
         format_str = '%%0.%if' % precision
@@ -240,3 +313,34 @@ class NLM(object):
                     vector = embedding
                 vector_string_rep = ' '.join(map(float_to_str, vector))
                 f.write('%s %s\n' % (index_to_word[index], vector_string_rep))
+
+    def get_embedding(self, word, include_synsets=None, normalize_components=False):
+        """include_synsets: None, 'all' or 'top'"""
+        if word not in self.word_to_symbol:
+            print 'warning: %s not in vocab' % word
+        word_embedding = self.embedding_layer.embedding[self.word_to_symbol[word]]
+        if include_synsets is None:
+            components = [word_embedding]
+        else:
+            word_synsets = wn.synsets(word)
+            if not word_synsets:
+                indices = [0]
+            elif include_synsets == 'all':
+                indices = [self.synset_to_symbol[synset] for synset in word_synsets]
+            elif include_synsets == 'top':
+                indices = [self.synset_to_symbol[word_synsets[0]]]
+            synset_embedding = self.synset_embedding_layer.embedding[indices].mean(0)
+            components = [word_embedding, synset_embedding]
+        if normalize_components:
+            components = [component / np.linalg.norm(component, 2)
+                          for component in components]
+        return np.concatenate(components)
+
+    def get_synset_embedding(self, synset, normalize=False):
+        if synset not in self.synset_to_symbol:
+            print 'warning: %s not in known synsets' % synset
+        synset_embedding = self.synset_embedding_layer.embedding[self.synset_to_symbol[synset]]
+        if normalize:
+            return synset_embedding / np.linalg.norm(synset_embedding, 2)
+        else:
+            return synset_embedding

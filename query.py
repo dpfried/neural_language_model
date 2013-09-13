@@ -1,7 +1,7 @@
 # coding: utf-8
 import cPickle
 import numpy as np
-from scipy.spatial.distance import pdist, cosine
+from scipy.spatial.distance import cdist, cosine
 import gzip
 import ngrams
 from collections import defaultdict
@@ -42,13 +42,10 @@ def top_indices_from_distances(distances, reverse_map, n=10):
     print top_indices
     return [(reverse_map[i], distances[i]) for i in top_indices]
 
-def query(model, ngram_reader, word, n=10):
+def query(model, word, n=10):
     # TODO update this to handle synset embeddings
-    id_map, reverse_map = maps(ngram_reader)
-    if word not in id_map:
-        raise Exception('%s not in vocabulary' % word)
-    index = id_map[word]
-    embeddings = classifier.embedding_layer.embedding
+    index = model.word_to_symbol[word]
+    embeddings = model.embedding_layer.embedding
     this_embedding = embeddings[index]
     distances = cdist(this_embedding[np.newaxis,:], embeddings, 'cosine').flatten()
-    return top_indices_from_distances(distances, reverse_map, n=n)
+    return top_indices_from_distances(distances, model.symbol_to_word, n=n)

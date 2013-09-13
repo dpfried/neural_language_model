@@ -6,6 +6,7 @@ import numpy as np
 import sys
 from query import load_model_and_ngrams,  make_analogy_fns
 import gzip, cPickle
+import tempfile
 
 def attr_dict(filename):
     with open(filename) as f:
@@ -33,10 +34,12 @@ def get_examples(answer_file):
     with open(answer_file) as f:
         return [line.lower().strip().strip('"').split(':') for line in f]
 
-def run(model, include_synsets, normalize_components, semeval_root, output_folder):
+def run(model, include_synsets, normalize_components, semeval_root):
     analogy_fn, choose_best = make_analogy_fns(model,
                                                include_synsets=include_synsets,
                                                normalize_components=normalize_components)
+
+    output_folder = tempfile.mkdtemp()
 
     def semeval_path(suffix):
         return os.path.join(semeval_root, suffix)
@@ -122,7 +125,7 @@ if __name__ == "__main__":
     parser.add_argument('--all_synsets', action='store_true',)
     parser.add_argument('--top_synset', action='store_true',)
     parser.add_argument('--normalize_components', action='store_true',)
-    parser.add_argument('--output_folder', help="folder to write results to", default="/home/dfried/code/nlm/semeval/junk")
+    # parser.add_argument('--output_folder', help="folder to write results to", default="/home/dfried/code/nlm/semeval/junk")
     parser.add_argument('--semeval_root', help="folder containing semeval data", default="/home/dfried/code/semeval")
     args = parser.parse_args()
 
@@ -136,7 +139,7 @@ if __name__ == "__main__":
     else:
         include_synsets=None
 
-    mean_cor, mean_acc = run(model, include_synsets, args.normalize_components, args.semeval_root, args.output_folder)
+    mean_cor, mean_acc = run(model, include_synsets, args.normalize_components, args.semeval_root)
 
     print 'average correlation: %f' % mean_cor
     print 'average accuracy: %f' % mean_acc

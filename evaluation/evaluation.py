@@ -39,8 +39,7 @@ def run_model(model, include_synsets, normalize_components, args):
             = semeval.run(model,
                           include_synsets,
                           normalize_components,
-                          args.semeval_root,
-                          args.semeval_output_folder)
+                          args.semeval_root)
 
     stats['wordsim_rho'], _ = wordsim.run(model,
                                           include_synsets,
@@ -61,10 +60,12 @@ if __name__ == "__main__":
 
     parser.add_argument('--grefenstette_verb_file', default='/home/dfried/code/verb_disambiguation')
 
-    parser.add_argument('--semeval_output_folder', help="folder to write results to", default="/home/dfried/code/nlm/semeval/junk")
+    # parser.add_argument('--semeval_output_folder', help="folder to write results to", default="/home/dfried/code/nlm/semeval/junk")
     parser.add_argument('--semeval_root', help="folder containing semeval data", default="/home/dfried/code/semeval")
 
     parser.add_argument('--wordsim_root', help="folder containing wordsim353 csv file", default="/home/dfried/data/wordsim/combined.csv")
+
+    parser.add_argument('--limit', type=int, default=None)
     args = parser.parse_args()
 
     if args.all_synsets:
@@ -83,6 +84,9 @@ if __name__ == "__main__":
         plt.figure()
         plt.title(stat_name)
         for model_directory, data in all_stats.items():
-            data[stat_name].plot(label=model_directory)
-        plt.legend()
+            to_plot = data[stat_name]
+            if args.limit:
+                to_plot = to_plot[to_plot.index <= args.limit]
+            to_plot.plot(label=model_directory)
+        plt.legend(loc='lower right')
     plt.show()

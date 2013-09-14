@@ -3,13 +3,15 @@ import itertools
 import numpy as np
 import sys
 import math
-from cython.parallel cimport prange
 
 def pos_depth(synset):
-    if synset.pos not in synset._wordnet_corpus_reader._max_depth:
-        synset._wordnet_corpus_reader._compute_max_depth(synset.pos, True)
+    try:
+        if synset.pos not in synset._wordnet_corpus_reader._max_depth:
+            synset._wordnet_corpus_reader._compute_max_depth(synset.pos, True)
 
-    return synset._wordnet_corpus_reader._max_depth[synset.pos]
+        return synset._wordnet_corpus_reader._max_depth[synset.pos]
+    except:
+        print synset
 
 def lch_similarity(wunsch_paths, synset1, synset2):
         """
@@ -36,13 +38,13 @@ def lch_similarity(wunsch_paths, synset1, synset2):
 
         if distance is None or distance < 0 or depth == 0:
             return None
-        return -math.log((distance + 1) / (2.0 * depth))
+        return -math.log((distance + 1) / (2.0 * depth + 2))
 
 def distance_norm(reference_synset):
     depth = pos_depth(reference_synset)
     if depth == 0:
         return None
-    return -math.log(1. / (2.0 * depth))
+    return -math.log(1. / (2.0 * depth + 2))
 
 def scaled_lch_similarity(wunsch_paths, synset1, synset2):
     lch_sim = lch_similarity(wunsch_paths, synset1, synset2)
@@ -337,23 +339,19 @@ def pairwise_similarity(synsets1, synsets2, similarity_fn=safe_similarity_wrappe
 
 def make_similarity_matrix(words, print_output=True, **kwargs):
     # todo: how do we handle the diagonals?
-    cdef int N
     N = len(words)
     print 'getting synsets'
     synsets_for_word = [wn.synsets(word) for word in words]
     similarity_matrix = np.zeros((N, N))
-    cdef int index1
-    for index1 in prange(N, nogil=True):
-        with gil:
-            word1 = words[index1]
-            synsets1 = synsets_for_word[index1]
-            if print_output:
-                sys.stdout.write('\r%i / %i \t (%0.2f) \t %s' % (index1, N, float(index1) / N, word1))
-                sys.stdout.flush()
-                pass
-            vals = np.array([pairwise_similarity(synsets1, synsets_for_word[index2], **kwargs)
-                    for index2 in xrange(index1, N)])
-            similarity_matrix[index1,index1:] = vals
-            similarity_matrix[index1:,index1] = vals
+    for index1 in xrange(N):
+        word1 = words[index1]
+        synsets1 = synsets_for_word[index1]
+        if print_output:
+            sys.stdout.write('\r%i / %i \t (%0.2f) \t %s' % (index1, N, float(index1) / N, word1))
+            sys.stdout.flush()
+        vals = np.array([pairwise_similarity(synsets1, synsets_for_word[index2], **kwargs)
+                for index2 in xrange(index1, N)])
+        similarity_matrix[index1,index1:] = vals
+        similarity_matrix[index1:,index1] = vals
     print
     return similarity_matrix

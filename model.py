@@ -5,6 +5,7 @@ from utils import grouper
 from nltk.corpus import wordnet as wn
 from collections import defaultdict
 import numpy as np
+from scipy.spatial.distance import cdist
 
 class EmbeddingLayer(object):
     def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01):
@@ -53,6 +54,12 @@ class EmbeddingLayer(object):
 
     def update_embeddings(self, symbol_indices, updates):
         self.embedding[symbol_indices] += np.array(updates)
+
+    def most_similar_embeddings(self, index, metric='cosine', top_n=10, **kwargs):
+        embedding = self.embedding[index]
+        C = cdist(embedding[np.newaxis,:], self.embedding, metric, **kwargs)
+        sims = C[0]
+        return [(i, sims[i]) for i in np.argsort(sims)[:top_n]]
 
 class LinearScalarResponse(object):
     def __init__(self, n_in):

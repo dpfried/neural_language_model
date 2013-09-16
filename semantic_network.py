@@ -44,7 +44,8 @@ class EmbeddingTrainer(object):
                 vector_string_rep = ' '.join(map(float_to_str, vector))
                 f.write('%s %s\n' % (self.symbol_to_word[index], vector_string_rep))
 
-    def get_embedding(self, word, normalize_components=False):
+    def get_embedding(self, word, normalize_components=False, include_synsets=None):
+        """include_synsets not used but need it for interface to evaluation scripts"""
         if word not in self.word_to_symbol:
             print 'warning: %s not in vocab' % word
         word_embedding = self.get_embeddings()[self.word_to_symbol[word]]
@@ -223,11 +224,13 @@ if __name__ == "__main__":
     parser.add_argument('type', help='either "net" or "distance"')
     parser.add_argument('--model_basename', help='save to this file')
     parser.add_argument('--dimensions', type=int, default=50)
+    parser.add_argument('--sampling', type=str, default='semantic_nearest or embedding_nearest or random')
+    parser.add_argument('--k_nearest', type=int, default=20)
     parser.add_argument('--n_hidden', type=int, default=50, help="only valid if type is net")
     args = parser.parse_args()
     num_epochs = None
     N = 50000
-    k_nearest = 20
+    k_nearest = args.k_nearest
     print 'loading reader'
     reader = NgramReader('/cl/nldata/books_google_ngrams_eng/5grams_size3.hd5', vocab_size=N)
     print 'loading semantic module'
@@ -237,6 +240,7 @@ if __name__ == "__main__":
     other_params = {
         'N': N,
         'k_nearest': k_nearest,
+        'sampling': args.sampling,
     }
     if args.type == 'net':
         network = SemanticNet(rng, word_similarity.vocabulary, args.dimensions, args.n_hidden, 0, 0, other_params=other_params)
@@ -254,12 +258,28 @@ if __name__ == "__main__":
             this_count += 1
             if i == 0:
                 continue # skip rare word w/ undef similarities
-            for j, sim in word_similarity.most_similar_indices(i, top_n = k_nearest):
-                if sim == -np.inf:
-                    continue
-                cost, w1_update, w2_update = network.train(i, j, sim)
-                costs.append(cost)
-            sys.stdout.write('\r epoch %d: %d / %d' % (epoch, this_count, N))
+            if args.sampling == 'semantic_nearest':
+                for j, sim in word_similarity.most_similar_indices(i, top_n = k_nearest):
+                    if sim == -np.inf:
+                        continue
+                    cost, w1_update, w2_update = network.train(i, j, sim)
+                    costs.append(cost)
+            elif args.sampling == 'embedding_nearest':
+                for j, embedding_dist in network.embedding_layer.most_similar_embeddings(i, top_n=k_nearest):
+                    sim = word_similarity.word_pairwise_sims[i, j]
+                    if sim == -np.inf:
+                        continue
+                    cost, w1_update, w2_update = network.train(i, j, sim)
+                    costs.append(cost)
+            elif args.sampling == 'random':
+                for j in rng.permutation(N)[:k_nearest]:
+                    sim = word_similarity.word_pairwise_sims[i, j]
+                    if sim == -np.inf:
+                        continue
+                    cost, w1_update, w2_update = network.train(i, j, sim)
+                    costs.append(cost)
+
+            sys.stdout.write('\r epoch %d: %d / %d\r' % (epoch, this_count, N))
             sys.stdout.flush()
         print 'epoch %d complete\ttraining cost %f' % (epoch, np.mean(costs))
         if epoch % SAVE_EVERY == 0 and args.model_basename:

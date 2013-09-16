@@ -7,6 +7,8 @@ import sys
 from query import load_model_and_ngrams,  make_analogy_fns
 import gzip, cPickle
 import tempfile
+from semantic_network import *
+from semantic_network import _default_word
 
 def attr_dict(filename):
     with open(filename) as f:

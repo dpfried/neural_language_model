@@ -6,9 +6,6 @@ from nltk.corpus import wordnet as wn
 from collections import defaultdict
 import numpy as np
 
-# code adapted from DeepLearning tutorial:
-# deeplearning.net/tutorial/mlp.html
-
 class EmbeddingLayer(object):
     def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01):
         """ Initialize the parameters of the embedding layer
@@ -109,17 +106,24 @@ class HiddenLayer(object):
         # Note: optimal init of weights depends on the activation function
         # used (among other things). Results in Xavier10 suggest using
         # 4 times larger initial weights for sigmoid compared to tanh
+        if n_out > 1:
+            size = (n_in, n_out)
+        else:
+            size = (n_in,)
         W_values = np.asarray(rng.uniform(
             low=-np.sqrt(6. / (n_in + n_out)),
             high=np.sqrt(6. / (n_in + n_out)),
-            size=(n_in, n_out)), dtype=theano.config.floatX)
+            size=size), dtype=theano.config.floatX)
 
         if activation == T.nnet.sigmoid:
             W_values *= 4
 
         self.W = theano.shared(value=W_values, name='W')
 
-        b_values = np.zeros((n_out,), dtype=theano.config.floatX)
+        if n_out > 1:
+            b_values = np.zeros((n_out,), dtype=theano.config.floatX)
+        else:
+            b_values= 0.0
         self.b = theano.shared(value=b_values, name='b')
 
         # parameters of the model

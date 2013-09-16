@@ -4,8 +4,8 @@ import os
 import re
 import gzip, cPickle
 import pandas
-from semantic_network import *
-from semantic_network import _default_word
+from model import *
+from model import _default_word
 
 digit_extractor = re.compile(r'.*/model-(\d+).pkl.gz')
 def make_series(model_root_folder, include_synsets, normalize_components, args):

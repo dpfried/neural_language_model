@@ -7,52 +7,7 @@ import gzip, cPickle
 import semantic_module
 import sys
 
-from model import EmbeddingLayer, HiddenLayer
-
-def _default_word():
-    '''have to do this as a module level function b/c otherwise pickle won't
-    let us save the defaultdict inside EmbeddingTrainer'''
-    return '*UNKNOWN*'
-
-class EmbeddingTrainer(object):
-    def __init__(self, rng, vocabulary, dimensions):
-        self.rng = rng
-        self.vocabulary = vocabulary
-        self.vocab_size = len(self.vocabulary)
-
-        self.symbol_to_word = defaultdict(_default_word, dict(enumerate(self.vocabulary)))
-        self.symbol_to_word[0] = _default_word()
-        self.word_to_symbol = defaultdict(int, dict((word, index) for index, word in enumerate(self.vocabulary)))
-
-        self.dimensions = dimensions
-
-    def get_embeddings():
-        pass
-
-    def dump_embeddings(self, filename, normalize=True, precision=8):
-        format_str = '%%0.%if' % precision
-        float_to_str = lambda f: format_str % f
-        with open(filename, 'w') as f:
-            for index, embedding in enumerate(self.embeddings()):
-                # skip RARE
-                if index == 0:
-                    continue
-                if normalize:
-                    vector = embedding / np.sqrt(np.dot(embedding, embedding))
-                else:
-                    vector = embedding
-                vector_string_rep = ' '.join(map(float_to_str, vector))
-                f.write('%s %s\n' % (self.symbol_to_word[index], vector_string_rep))
-
-    def get_embedding(self, word, normalize_components=False, include_synsets=None):
-        """include_synsets not used but need it for interface to evaluation scripts"""
-        if word not in self.word_to_symbol:
-            print 'warning: %s not in vocab' % word
-        word_embedding = self.get_embeddings()[self.word_to_symbol[word]]
-        if normalize_components:
-            return word_embedding / np.linalg.norm(word_embedding, 2)
-        else:
-            return word_embedding
+from model import EmbeddingLayer, HiddenLayer, EmbeddingTrainer
 
 class SemanticDistance(EmbeddingTrainer):
     def __init__(self, rng, vocabulary, dimensions):
@@ -93,6 +48,9 @@ class SemanticDistance(EmbeddingTrainer):
 
         self.similarity = theano.function(inputs=embeddings,
                                            outputs=self.similarity_symbolic(w1_embedding, w2_embedding))
+
+        # no params to update (embeddings are handled separately)
+        self.params = []
 
     def train(self, w1_index, w2_index, actual_similarity, weighted_learning_rate=0.01):
         w1_embedding = self.embedding_layer.embeddings_from_symbols(w1_index)
@@ -150,6 +108,7 @@ class SemanticNet(EmbeddingTrainer):
                                         activation=T.tanh)
 
         self.layer_stack = [self.hidden_layer, self.output_layer]
+        self.params = self.hidden_layer.params + self.output_layer.params
 
         self.L1 = abs(self.hidden_layer.W).sum() + abs(self.output_layer.W).sum()
 
@@ -180,7 +139,7 @@ class SemanticNet(EmbeddingTrainer):
 
         # update the params of the model using the gradients
         updates = [(param, param - weighted_learning_rate * T.grad(cost, param))
-                   for param in self.hidden_layer.params + self.output_layer.params]
+                   for param in self.params]
 
         dembeddings = T.grad(cost, embeddings)
 

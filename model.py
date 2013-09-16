@@ -19,9 +19,12 @@ class EmbeddingTrainer(object):
         self.vocabulary = vocabulary
         self.vocab_size = len(self.vocabulary)
 
-        self.symbol_to_word = defaultdict(default_word, dict(enumerate(self.vocabulary)))
-        self.symbol_to_word[0] = default_word()
-        self.word_to_symbol = defaultdict(int, dict((word, index) for index, word in enumerate(self.vocabulary)))
+        try:
+            self.symbol_to_word = defaultdict(default_word, dict(enumerate(self.vocabulary)))
+            self.symbol_to_word[0] = default_word()
+            self.word_to_symbol = defaultdict(int, dict((word, index) for index, word in enumerate(self.vocabulary)))
+        except:
+            print 'model has already defined symbol lookup tables'
 
         self.dimensions = dimensions
 

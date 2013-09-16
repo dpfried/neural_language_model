@@ -2,7 +2,7 @@ import csv
 from scipy.spatial.distance import cosine
 import gzip, cPickle
 from semantic_network import *
-from semantic_network import _default_word
+from model import _default_word
 
 from scipy.stats import spearmanr
 

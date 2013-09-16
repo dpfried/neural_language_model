@@ -7,7 +7,7 @@ import sys
 from query import load_model_and_ngrams,  make_analogy_fns
 import gzip, cPickle
 import tempfile
-from model import *
+from semantic_network import *
 from model import _default_word
 
 def attr_dict(filename):

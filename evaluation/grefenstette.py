@@ -2,7 +2,7 @@ import numpy as np
 from scipy.spatial.distance import cosine
 import gzip, cPickle
 from scipy.stats import spearmanr
-from model import *
+from semantic_network import *
 from model import _default_word
 
 def parse_line(line):

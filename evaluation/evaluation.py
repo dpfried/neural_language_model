@@ -4,7 +4,7 @@ import os
 import re
 import gzip, cPickle
 import pandas
-from model import *
+from semantic_network import *
 from model import _default_word
 
 digit_extractor = re.compile(r'.*/model-(\d+).pkl.gz')

@@ -2,7 +2,6 @@ from ngrams import NgramReader
 import theano
 import theano.tensor as T
 import numpy as np
-from collections import defaultdict
 import gzip, cPickle
 import semantic_module
 import sys

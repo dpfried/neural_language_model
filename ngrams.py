@@ -96,5 +96,25 @@ class NgramReader(object):
         noisy[column_index] = replacement_word
         return noisy
 
+    def contrastive_symbols_from_row(self, row, replacement_column_index=None, rng=None):
+        if replacement_column_index is None:
+            replacement_column_index = self.ngram_length / 2
+        """
+        given a row of an ngram matrix reprsenting a training ngram, return a
+        list of the symbols corresponding to words in that ngram, a corrupted
+        list of the same symbols, and the frequency of the original ngram in
+        the training corpus
+        """
+        # last two columns are reserved for frequency of ngram and cumulative
+        # frequency, respectively
+        correct_symbols = row[:-2]
+        ngram_frequency = row[-2]
+        # get a list of symbols representing a corrupted ngram
+        # TODO: maybe move add_noise_to_symbols from ngram_reader to this file?
+        error_symbols = self.add_noise_to_symbols(correct_symbols, column_index=replacement_column_index, rng=rng)
+        return correct_symbols, error_symbols, ngram_frequency
+
+
+
 class PosNgramReader(NgramReader):
     pass

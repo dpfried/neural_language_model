@@ -9,6 +9,7 @@ import gzip, cPickle
 import tempfile
 from semantic_network import *
 from model import _default_word
+from admm import *
 
 def attr_dict(filename):
     with open(filename) as f:

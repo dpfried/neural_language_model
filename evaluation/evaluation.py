@@ -1,13 +1,12 @@
 import grefenstette, semeval, wordsim
-import glob
 import os
-import re
 import gzip, cPickle
 import pandas
 from semantic_network import *
 from model import _default_word
+from admm import *
+from utils import models_in_folder
 
-digit_extractor = re.compile(r'.*/model-(\d+).pkl.gz')
 def make_series(model_root_folder, include_synsets, normalize_components, args):
     store_fname = os.path.join(model_root_folder, 'eval-%s-%s.pkl' % (include_synsets, normalize_components))
     try:
@@ -15,15 +14,16 @@ def make_series(model_root_folder, include_synsets, normalize_components, args):
     except:
         stats = pandas.DataFrame()
 
-    get_model_fname = lambda model_num: os.path.join(model_root_folder, 'model-%s.pkl.gz' % model_num)
-    model_fnames = glob.glob(get_model_fname('*'))
-    model_nums = sorted([int(digit_extractor.match(fname).groups()[0])
-                         for fname in model_fnames])
+    models = models_in_folder(model_root_folder)
+    model_nums = sorted(models.keys())
+
     to_plot = [n for n in model_nums if n % args.plot_interval == 0]
+    if args.limit is not None:
+        to_plot = [n for n in to_plot if n <= args.limit]
     for n in to_plot:
         if n in stats.index:
             continue
-        with gzip.open(get_model_fname(n)) as f:
+        with gzip.open(models_in_folder[n]) as f:
             model = cPickle.load(f)
         this_stats = run_model(model, include_synsets, normalize_components, args)
         stats = pandas.concat([stats, pandas.DataFrame([this_stats], index=[n])]).sort()

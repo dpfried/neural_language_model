@@ -5,6 +5,7 @@ from semantic_network import *
 from model import _default_word
 
 from scipy.stats import spearmanr
+from admm import *
 
 def run(model, include_synsets, normalize_components, wordsim_root):
     def get_embedding(word):

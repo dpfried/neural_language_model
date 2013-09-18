@@ -4,6 +4,7 @@ import gzip, cPickle
 from scipy.stats import spearmanr
 from semantic_network import *
 from model import _default_word
+from admm import *
 
 def parse_line(line):
     tokens = line.lower().strip().split()

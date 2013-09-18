@@ -45,7 +45,7 @@ def top_indices_from_distances(distances, reverse_map, n=10):
 def query(model, word, n=10):
     # TODO update this to handle synset embeddings
     index = model.word_to_symbol[word]
-    embeddings = model.embedding_layer.embedding
+    embeddings = model.get_embeddings()
     this_embedding = embeddings[index]
     distances = cdist(this_embedding[np.newaxis,:], embeddings, 'cosine').flatten()
     return top_indices_from_distances(distances, model.symbol_to_word, n=n)

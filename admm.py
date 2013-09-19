@@ -103,8 +103,8 @@ class ADMMModel(object):
 
         outputs = self.syntactic_update_function(*(syntactic_correct + syntactic_error + semantic_correct + semantic_error + y_weights))
 
-        correct_grads, error_grads = list(grouper(self.syntactic_model.sequence_length, outputs))[:2]
-
+        correct_grads = outputs[:self.syntactic_model.sequence_length]
+        error_grads = outputs[self.syntactic_model.sequence_length:-2]
         cost, augmented_cost = outputs[-2:]
 
         weight = self.syntactic_gd_rate.get_value()
@@ -191,7 +191,7 @@ if __name__ == "__main__":
     parser.add_argument('--train_proportion', type=float, default=0.95)
     parser.add_argument('--dimensions', type=int, default=75)
     parser.add_argument('--sequence_length', type=int, default=5)
-    parser.add_argument('--n_hidden', type=int, default=20)
+    parser.add_argument('--n_hidden', type=int, default=200)
     parser.add_argument('--rho', type=float, default=1.0)
     parser.add_argument('--y_init', type=float, default=1.0)
     parser.add_argument('--semantic_gd_rate', type=float, default=0.1)
@@ -203,11 +203,13 @@ if __name__ == "__main__":
     parser.add_argument('--save_model_frequency', type=int, default=1)
     parser.add_argument('--dont_save_model', action='store_true')
     parser.add_argument('--dont_save_stats', action='store_true')
+    parser.add_argument('--syntactic_blocks_to_run', type=int, default=1)
     args = vars(parser.parse_args())
 
     # see if this model's already been run. If it has, load it and get the
     # params
-    models = models_in_folder(args['base_dir'])
+    base_dir = args['base_dir']
+    models = models_in_folder(base_dir)
     if models:
         model_num = max(models.keys())
         print 'loading existing model %s' % models[model_num]
@@ -216,6 +218,8 @@ if __name__ == "__main__":
 
         model_loaded = True
         args = model.other_params
+        # rewrite in case we've copied the model file into this folder
+        args['base_dir'] = base_dir
     else:
         model_loaded = False
 
@@ -262,29 +266,40 @@ if __name__ == "__main__":
     except:
         all_stats = pandas.DataFrame()
 
+    blocks_to_run = args.get('syntactic_blocks_to_run', 1)
+
     while True:
         model.increase_k()
         stats_for_k = {}
         # syntactic update step
         costs = []
         augmented_costs = []
-        training_block = ngram_reader.training_block(rng.random_sample())
-        block_size = training_block.shape[0]
-        for count in xrange(block_size):
-            if count % print_freq == 0:
-                sys.stdout.write('\rk %i: ngram %d of %d (%f %%)' % (model.k, count, block_size, 100. * count / block_size))
-                sys.stdout.flush()
-            train_index = sample_cumulative_discrete_distribution(training_block[:,-1])
-            correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], rng=rng)
-            cost, augmented_cost, correct_updates, error_updates = model.update_syntactic(correct_symbols, error_symbols)
-            costs.append(cost)
-            augmented_costs.append(augmented_cost)
+        for block_num in xrange(blocks_to_run):
+            training_block = ngram_reader.training_block(rng.random_sample())
+            block_size = training_block.shape[0]
+            for count in xrange(block_size):
+                if count % print_freq == 0:
+                    sys.stdout.write('\rk %i b%i: ngram %d of %d' % (model.k, block_num, count, block_size))
+                    sys.stdout.flush()
+                train_index = sample_cumulative_discrete_distribution(training_block[:,-1], rng=rng)
+                correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], rng=rng)
+                cost, augmented_cost, correct_updates, error_updates = model.update_syntactic(correct_symbols, error_symbols)
+                costs.append(cost)
+                augmented_costs.append(augmented_cost)
+            if blocks_to_run > 1:
+                print
+                print  '%i intermediate mean %f' % (block_num, np.mean(costs[-block_size:]))
+                print  '%i intermediate aug mean %f' % (block_num, np.mean(augmented_costs[-block_size:]))
 
         print
         stats_for_k['syntactic_mean'] = np.mean(costs)
+        stats_for_k['syntactic_std'] = np.std(costs)
         print 'syntactic mean cost \t%f' % stats_for_k['syntactic_mean']
+        print 'syntactic std cost \t%f' % stats_for_k['syntactic_std']
         stats_for_k['syntactic_mean_augmented'] = np.mean(augmented_costs)
+        stats_for_k['syntactic_std_augmented'] = np.std(augmented_costs)
         print 'syntactic mean augmented cost \t%f' % stats_for_k['syntactic_mean_augmented']
+        print 'syntactic std augmented cost \t%f' % stats_for_k['syntactic_std_augmented']
 
         # semantic update step
         this_count = 0
@@ -320,9 +335,13 @@ if __name__ == "__main__":
 
         print
         stats_for_k['semantic_mean'] = np.mean(costs)
+        stats_for_k['semantic_std'] = np.std(costs)
         print 'semantic mean cost \t%f' % stats_for_k['semantic_mean']
+        print 'semantic std cost \t%f' % stats_for_k['semantic_std']
         stats_for_k['semantic_mean_augmented'] = np.mean(augmented_costs)
+        stats_for_k['semantic_std_augmented'] = np.std(augmented_costs)
         print 'semantic mean augmented cost \t%f' % stats_for_k['semantic_mean_augmented']
+        print 'semantic std augmented cost \t%f' % stats_for_k['semantic_std_augmented']
 
         # lagrangian update
         print 'updating y'

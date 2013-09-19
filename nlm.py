@@ -149,7 +149,6 @@ if __name__ == '__main__':
         'blocks_to_run':np.inf,
         'stats_output_file': args.stats_output_file,
         'save_model_frequency': args.save_model_frequency,
-        'update_related_weight': args.update_related_weight,
     }
     other_params = {
         'ngram_filename': args.ngram_filename,

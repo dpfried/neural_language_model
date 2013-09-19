@@ -23,7 +23,7 @@ def make_series(model_root_folder, include_synsets, normalize_components, args):
     for n in to_plot:
         if n in stats.index:
             continue
-        with gzip.open(models_in_folder[n]) as f:
+        with gzip.open(models[n]) as f:
             model = cPickle.load(f)
         this_stats = run_model(model, include_synsets, normalize_components, args)
         stats = pandas.concat([stats, pandas.DataFrame([this_stats], index=[n])]).sort()

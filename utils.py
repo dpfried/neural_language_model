@@ -5,6 +5,13 @@ import glob
 import os
 
 def sample_cumulative_discrete_distribution(cumulative_dist, rng=None):
+    """
+    cumulative_dist should be a increasing list of positive values,
+    representing a cumulative frequency distribution (need not be normalized).
+    Samples the distribution and returns the index of the bin chosen.
+    If rng is passed (an instance of L{np.random.RandomState}), this will
+    be used for the sampling
+    """
     if rng is None:
         rng = np.random
     max_val = cumulative_dist[-1]
@@ -17,6 +24,10 @@ def grouper(n, iterable, padvalue=None):
 
 MODEL_NUMBER_EXTRACTOR = re.compile(r'.*/model-(\d+).pkl.gz')
 def models_in_folder(folder):
+    """
+    given a folder containing pickled, zipped models with names of the form model-XX.pkl.gz, return
+    a dictionary mapping XX to the model filename
+    """
     get_model_fname = lambda model_num: os.path.join(folder, 'model-%s.pkl.gz' % model_num)
     model_fnames = glob.glob(get_model_fname('*'))
     return dict((int(MODEL_NUMBER_EXTRACTOR.match(fname).groups()[0]), fname)

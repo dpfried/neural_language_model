@@ -18,10 +18,14 @@ def make_series(model_root_folder, include_synsets, normalize_components, args):
     model_nums = sorted(models.keys())
 
     to_plot = [n for n in model_nums if n % args.plot_interval == 0]
+    if 1 in model_nums:
+        to_plot = [1] + to_plot
     if args.limit is not None:
         to_plot = [n for n in to_plot if n <= args.limit]
+    print model_root_folder
     for n in to_plot:
         if n in stats.index:
+            print 'already has %i' % n
             continue
         with gzip.open(models[n]) as f:
             model = cPickle.load(f)
@@ -68,6 +72,7 @@ if __name__ == "__main__":
     parser.add_argument('--wordsim_root', help="folder containing wordsim353 csv file", default="/home/dfried/data/wordsim/combined.csv")
 
     parser.add_argument('--limit', type=int, default=None)
+    parser.add_argument('--save_graphs_base')
     args = parser.parse_args()
 
     if args.all_synsets:
@@ -86,9 +91,15 @@ if __name__ == "__main__":
         plt.figure()
         plt.title(stat_name)
         for model_directory, data in all_stats.items():
-            to_plot = data[stat_name]
-            if args.limit:
-                to_plot = to_plot[to_plot.index <= args.limit]
-            to_plot.plot(label=model_directory)
-        plt.legend(loc='lower right')
+            try:
+                to_plot = data[stat_name]
+                if args.limit:
+                    to_plot = to_plot[to_plot.index <= args.limit]
+                to_plot.plot(label=model_directory)
+            except Exception as e:
+                print stat_name, model_directory
+                print e
+        plt.legend(loc='lower right').get_frame().set_alpha(0.6)
+        if args.save_graphs_base:
+            plt.savefig('%s_%s.pdf' % (args.save_graphs_base, stat_name), bbox_inches='tight')
     plt.show()

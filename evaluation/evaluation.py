@@ -1,14 +1,14 @@
 import grefenstette, semeval, wordsim
-import os
 import gzip, cPickle
 import pandas
 from semantic_network import *
 from model import _default_word
 from admm import *
 from utils import models_in_folder
+from os.path import split, join
 
 def make_series(model_root_folder, include_synsets, normalize_components, args):
-    store_fname = os.path.join(model_root_folder, 'eval-%s-%s.pkl' % (include_synsets, normalize_components))
+    store_fname = join(model_root_folder, 'eval-%s-%s.pkl' % (include_synsets, normalize_components))
     try:
         stats = pandas.read_pickle(store_fname)
     except:
@@ -95,7 +95,7 @@ if __name__ == "__main__":
                 to_plot = data[stat_name]
                 if args.limit:
                     to_plot = to_plot[to_plot.index <= args.limit]
-                to_plot.plot(label=model_directory)
+                to_plot.plot(label=split(model_directory)[1])
             except Exception as e:
                 print stat_name, model_directory
                 print e

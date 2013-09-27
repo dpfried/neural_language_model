@@ -186,9 +186,13 @@ class ADMMModel(object):
 
     def get_embedding(self, *args, **kwargs):
         return self.syntactic_model.get_embedding(*args, **kwargs)
+        # return np.concatenate([self.syntactic_model.get_embedding(*args, **kwargs), self.semantic_model.get_embedding(*args, **kwargs)])
+        # return 0.5 * (self.syntactic_model.get_embedding(*args, **kwargs) + self.semantic_model.get_embedding(*args, **kwargs))
 
     def get_embeddings(self):
         return self.syntactic_model.get_embeddings()
+        # return np.concatenate([self.syntactic_model.get_embeddings(), self.semantic_model.get_embeddings()], axis=1)
+        # return 0.5 * (self.syntactic_model.get_embeddings() + self.semantic_model.get_embeddings())
 
 if __name__ == "__main__":
     import argparse

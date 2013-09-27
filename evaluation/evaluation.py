@@ -7,7 +7,12 @@ from admm import *
 from utils import models_in_folder
 from os.path import split, join
 
-def make_series(model_root_folder, include_synsets, normalize_components, args):
+def make_series(model_root_folder,
+                include_synsets=None,
+                normalize_components=False,
+                plot_interval=100,
+                limit=None,
+                **run_model_args):
     store_fname = join(model_root_folder, 'eval-%s-%s.pkl' % (include_synsets, normalize_components))
     try:
         stats = pandas.read_pickle(store_fname)
@@ -17,11 +22,11 @@ def make_series(model_root_folder, include_synsets, normalize_components, args):
     models = models_in_folder(model_root_folder)
     model_nums = sorted(models.keys())
 
-    to_plot = [n for n in model_nums if n % args.plot_interval == 0]
+    to_plot = [n for n in model_nums if n % plot_interval == 0]
     if 1 in model_nums:
         to_plot = [1] + to_plot
-    if args.limit is not None:
-        to_plot = [n for n in to_plot if n <= args.limit]
+    if limit is not None:
+        to_plot = [n for n in to_plot if n <= limit]
     print model_root_folder
     for n in to_plot:
         if n in stats.index:
@@ -29,28 +34,32 @@ def make_series(model_root_folder, include_synsets, normalize_components, args):
             continue
         with gzip.open(models[n]) as f:
             model = cPickle.load(f)
-        this_stats = run_model(model, include_synsets, normalize_components, args)
+        this_stats = run_model(model, include_synsets, normalize_components, **run_model_args)
         stats = pandas.concat([stats, pandas.DataFrame([this_stats], index=[n])]).sort()
     stats.to_pickle(store_fname)
     return stats
 
-def run_model(model, include_synsets, normalize_components, args):
+def run_model(model, include_synsets=None, normalize_components=False,
+              grefenstette_verb_file='/home/dfried/code/verb_disambiguation',
+              semeval_root="/home/dfried/code/semeval",
+              wordsim_root="/home/dfried/data/wordsim/combined.csv",
+              **kwargs):
     stats = {}
     stats['grefenstette_rho'], _ = grefenstette.run(model,
                                                     include_synsets,
                                                     normalize_components,
-                                                    args.grefenstette_verb_file)
+                                                    grefenstette_verb_file)
 
     stats['semeval_correlation'], stats['semeval_accuracy'] \
             = semeval.run(model,
                           include_synsets,
                           normalize_components,
-                          args.semeval_root)
+                          semeval_root)
 
     stats['wordsim_rho'], _ = wordsim.run(model,
                                           include_synsets,
                                           normalize_components,
-                                          args.wordsim_root)
+                                          wordsim_root)
 
     return stats
 
@@ -62,7 +71,7 @@ if __name__ == "__main__":
     parser.add_argument('--plot_interval', type=int, default=100)
     parser.add_argument('--all_synsets', action='store_true',)
     parser.add_argument('--top_synset', action='store_true',)
-    parser.add_argument('--normalize_components', action='store_true',)
+    parser.add_argument('--normalize_components', action='store_true')
 
     parser.add_argument('--grefenstette_verb_file', default='/home/dfried/code/verb_disambiguation')
 
@@ -82,7 +91,9 @@ if __name__ == "__main__":
     else:
         include_synsets=None
 
-    all_stats = dict((model_directory, make_series(model_directory, include_synsets, args.normalize_components, args))
+    all_stats = dict((model_directory, make_series(model_directory,
+                                                   include_synsets=include_synsets,
+                                                   **vars(args)))
                      for model_directory in args.model_directories)
 
     stat_example = all_stats.values()[0]

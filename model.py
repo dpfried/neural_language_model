@@ -28,7 +28,7 @@ class EmbeddingTrainer(object):
 
         self.dimensions = dimensions
 
-    def get_embeddings():
+    def get_embeddings(self):
         pass
 
     def dump_embeddings(self, filename, normalize=True, precision=8):
@@ -56,6 +56,14 @@ class EmbeddingTrainer(object):
         else:
             return word_embedding
 
+class EmbeddingContainer(EmbeddingTrainer):
+    def __init__(self, vocabulary, embeddings):
+        vocab_size, dimensions = embeddings.shape
+        super(EmbeddingContainer, self).__init__(None, vocabulary, dimensions)
+        self.embeddings = embeddings
+
+    def get_embeddings(self):
+        return self.embeddings
 
 class EmbeddingLayer(object):
     def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01):

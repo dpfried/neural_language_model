@@ -113,7 +113,10 @@ if __name__ == "__main__":
                 print 'exception'
                 print stat_name, model_directory
                 print e
-        plt.legend(loc='lower right').get_frame().set_alpha(0.6)
+        try:
+            plt.legend(loc='lower right').get_frame().set_alpha(0.6)
+        except Exception as e:
+            print e
         if args.save_graphs_base:
             plt.savefig('%s_%s.pdf' % (args.save_graphs_base, stat_name), bbox_inches='tight')
     plt.show()

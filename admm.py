@@ -201,6 +201,63 @@ class ADMMModel(object):
         return np.concatenate([self.syntactic_model.get_embeddings(), self.semantic_model.get_embeddings()], axis=1)
         # return 0.5 * (self.syntactic_model.get_embeddings() + self.semantic_model.get_embeddings())
 
+class AnnealingADMMModel(ADMMModel):
+    def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, semantic_annealing_T, semantic_gd_initial_rate, syntactic_annealing_T, syntactic_gd_initial_rate, normalize_y=False, y_init=0.0, syntactic_weight=0.5):
+        super(AnnealingADMMModel, self).__init__(syntactic_model,
+                                                 semantic_model,
+                                                 vocab_size,
+                                                 rho,
+                                                 other_params,
+                                                 y_init=y_init,
+                                                 semantic_gd_rate=semantic_gd_initial_rate,
+                                                 syntactic_gd_rate=syntactic_gd_initial_rate,
+                                                 normalize_y=normalize_y,
+                                                 syntactic_weight=syntactic_weight)
+        self.semantic_gd_initial_rate = semantic_gd_initial_rate
+        self.syntactic_gd_initial_rate = syntactic_gd_initial_rate
+        self.semantic_annealing_T = semantic_annealing_T
+        self.syntactic_annealing_T = syntactic_annealing_T
+
+    def increase_k(self):
+        super(AnnealingADMMModel, self).increase_k()
+        def decayed_rate(initial, T):
+            # initial: the maximum weight (at beginning)
+            # T: the param that controls how fast we descend (proportional to
+            # current value of k)
+            return float(initial) / (1 + float(self.k) / T)
+        self.semantic_gd_rate.set_value(decayed_rate(self.semantic_gd_initial_rate, self.semantic_annealing_T))
+        self.syntactic_gd_rate.set_value(decayed_rate(self.syntactic_gd_initial_rate, self.syntactic_annealing_T))
+
+def validate_syntactic(model, testing_block, ngram_reader, rng=None):
+    if rng is None:
+        rng = np.random
+
+    test_values = []
+    test_frequencies = []
+    n_test_instances = testing_block.shape[0]
+    for test_index in xrange(n_test_instances):
+        if test_index % print_freq == 0:
+            sys.stdout.write('\rtesting instance %d of %d (%f %%)\r' % (test_index, n_test_instances, 100. * test_index / n_test_instances))
+            sys.stdout.flush()
+        correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(testing_block[test_index], replacement_column_index=replacement_column_index, rng=rng)
+        test_values.append(model.syntactic_model.score(correct_symbols) - model.syntactic_model.score(error_symbols))
+        test_frequencies.append(ngram_frequency)
+    test_mean = np.mean(test_values)
+    test_weighted_mean = np.mean(np.array(test_values) * np.array(test_frequencies))
+    return test_mean, test_weighted_mean
+
+def validate_semantic(model, num_words, num_nearest, word_similarity, rng=None):
+    if rng is None:
+        rng = np.random
+    jaccards = []
+    for i in xrange(num_words):
+        index = rng.randint(model.vocab_size)
+        wn_closest = set(j for (j, sim) in word_similarity.most_similar_indices(index, top_n=num_nearest))
+        embedding_closest = set(j for (j, dist) in model.semantic_model.embedding_layer.most_similar_embeddings(i, top_n=num_nearest))
+        c_intersection = len(wn_closest.intersection(embedding_closest))
+        c_union = len(wn_closest.union(embedding_closest))
+        jaccards.append(float(c_intersection) / c_union)
+    return np.mean(jaccards)
 
 if __name__ == "__main__":
     import argparse
@@ -209,6 +266,7 @@ if __name__ == "__main__":
     parser.add_argument('--sampling', default='semantic_nearest', help='semantic_nearest | embedding_nearest | random')
     parser.add_argument('--vocab_size', type=int, default=50000)
     parser.add_argument('--train_proportion', type=float, default=0.95)
+    parser.add_argument('--test_proportion', type=float, default=0.0005)
     parser.add_argument('--dimensions', type=int, default=50)
     parser.add_argument('--sequence_length', type=int, default=5)
     parser.add_argument('--n_hidden', type=int, default=200)
@@ -228,6 +286,11 @@ if __name__ == "__main__":
     parser.add_argument('--syntactic_weight', type=float, default=0.5)
     parser.add_argument('--existing_syntactic_model', help='use this existing trained model as the syntactic model')
     parser.add_argument('--existing_semantic_model', help='use this existing trained model as the semantic model')
+    parser.add_argument('--annealing', action='store_true')
+    parser.add_argument('--semantic_annealing_T', type=float, default=100, help='if annealing is passed, use this to control how quickly the semantic learning rate decays from its initial value of semantic_gd_rate')
+    parser.add_argument('--syntactic_annealing_T', type=float, default=100, help='if annealing is passed, use this to control how quickly the syntactic learning rate decays from its initial value of syntactic_gd_rate')
+    parser.add_argument('--sem_validation_num_nearest', type=int, default=50, help='when running semantic validation after each round, look at the intersection of top N words in wordnet and top N by embedding for a given test word')
+    parser.add_argument('--sem_validation_num_to_test', type=int, default=500, help='in semantic validation after each round, the number of test words to sample')
     args = vars(parser.parse_args())
 
     base_dir = args['base_dir']
@@ -250,11 +313,13 @@ if __name__ == "__main__":
 
     replacement_column_index = args['sequence_length'] / 2
 
-    ngram_reader = NgramReader(args['ngram_filename'], vocab_size=args['vocab_size'], train_proportion=args['train_proportion'], test_proportion=None)
+    ngram_reader = NgramReader(args['ngram_filename'], vocab_size=args['vocab_size'], train_proportion=args['train_proportion'], test_proportion=args['test_proportion'])
+    testing_block = ngram_reader.testing_block()
     vocabulary = ngram_reader.word_array
     print 'corpus contains %i ngrams' % (ngram_reader.number_of_ngrams)
     rng = np.random.RandomState(args['random_seed'])
     data_rng = np.random.RandomState(args['random_seed'])
+    validation_rng = np.random.RandomState(args['random_seed'] + 1)
     random.seed(args['random_seed'])
     if not model_loaded:
         print 'constructing model...'
@@ -278,16 +343,31 @@ if __name__ == "__main__":
                                             vocabulary=vocabulary,
                                             dimensions=args['dimensions'])
 
-        model = ADMMModel(syntactic_model=_syntactic_model,
-                        semantic_model=_semantic_model,
-                        vocab_size=args['vocab_size'],
-                        rho=args['rho'],
-                        other_params=args,
-                        y_init=args['y_init'],
-                        semantic_gd_rate=args['semantic_gd_rate'],
-                        syntactic_gd_rate=args['syntactic_gd_rate'],
-                        normalize_y=args['normalize_y'],
-                          syntactic_weight=args['syntactic_weight'])
+        if args['annealing']:
+            print 'annealing'
+            model = AnnealingADMMModel(syntactic_model=_syntactic_model,
+                                       semantic_model=_semantic_model,
+                                       vocab_size=args['vocab_size'],
+                                       rho=args['rho'],
+                                       other_params=args,
+                                       semantic_annealing_T=args['semantic_annealing_T'],
+                                       semantic_gd_initial_rate=args['semantic_gd_rate'],
+                                       syntactic_annealing_T=args['syntactic_annealing_T'],
+                                       syntactic_gd_initial_rate=args['syntactic_gd_rate'],
+                                       normalize_y=args['normalize_y'],
+                                       y_init=args['y_init'],
+                                       syntactic_weight=args['syntactic_weight'])
+        else:
+            model = ADMMModel(syntactic_model=_syntactic_model,
+                            semantic_model=_semantic_model,
+                            vocab_size=args['vocab_size'],
+                            rho=args['rho'],
+                            other_params=args,
+                            y_init=args['y_init'],
+                            semantic_gd_rate=args['semantic_gd_rate'],
+                            syntactic_gd_rate=args['syntactic_gd_rate'],
+                            normalize_y=args['normalize_y'],
+                            syntactic_weight=args['syntactic_weight'])
 
     print 'loading semantic similarities'
     word_similarity = semantic_module.WordSimilarity(vocabulary, args['word_similarity_file'])
@@ -310,9 +390,10 @@ if __name__ == "__main__":
     sampling = args['sampling']
 
     while True:
-        print 'model rho', model.rho
         model.increase_k()
         stats_for_k = {}
+        if args['annealing']:
+            print 'current syntactic learning rate %f' % model.syntactic_gd_rate.get_value()
         # syntactic update step
         costs = []
         augmented_costs = []
@@ -336,6 +417,7 @@ if __name__ == "__main__":
         print
         stats_for_k['syntactic_mean'] = np.mean(costs)
         stats_for_k['syntactic_std'] = np.std(costs)
+        print 'training:'
         print 'syntactic mean cost \t%f' % stats_for_k['syntactic_mean']
         print 'syntactic std cost \t%f' % stats_for_k['syntactic_std']
         stats_for_k['syntactic_mean_augmented'] = np.mean(augmented_costs)
@@ -343,7 +425,21 @@ if __name__ == "__main__":
         print 'syntactic mean augmented cost \t%f' % stats_for_k['syntactic_mean_augmented']
         print 'syntactic std augmented cost \t%f' % stats_for_k['syntactic_std_augmented']
 
+        stats_for_k['syntactic_gd_rate'] = model.syntactic_gd_rate.get_value()
+        stats_for_k['semantic_gd_rate'] = model.semantic_gd_rate.get_value()
+
+        # syntactic validation
+        syn_validation_mean, syn_validation_weighted_mean = validate_syntactic(model, testing_block, ngram_reader, validation_rng)
+        stats_for_k['syntactic_validation_mean_score'] = syn_validation_mean
+        stats_for_k['syntactic_validation_weighted_mean_score'] = syn_validation_weighted_mean
+
+        print 'validation:'
+        print 'syntactic mean score \t%f' % syn_validation_mean
+        print 'syntactic mean weighted score \t%f' % syn_validation_mean
+
         # semantic update step
+        if args['annealing']:
+            print 'current semantic learning rate %f' % model.semantic_gd_rate.get_value()
         this_count = 0
         costs = []
         augmented_costs = []
@@ -384,6 +480,13 @@ if __name__ == "__main__":
         stats_for_k['semantic_std_augmented'] = np.std(augmented_costs)
         print 'semantic mean augmented cost \t%f' % stats_for_k['semantic_mean_augmented']
         print 'semantic std augmented cost \t%f' % stats_for_k['semantic_std_augmented']
+
+        # syntactic validation
+        semantic_mean_jaccard = validate_semantic(model, args['sem_validation_num_to_test'], args['sem_validation_num_nearest'], word_similarity, validation_rng)
+        stats_for_k['semantic_validation_mean_jaccard'] = semantic_mean_jaccard
+
+        print 'validation:'
+        print 'semantic mean jaccard \t%f' % semantic_mean_jaccard
 
         # lagrangian update
         print 'updating y'

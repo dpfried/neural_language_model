@@ -97,7 +97,8 @@ if __name__ == "__main__":
                                                    **vars(args)))
                      for model_directory in args.model_directories)
 
-    stat_example = all_stats.values()[0]
+    stat_example = [s for s in all_stats.values() if len(s) != 0][0]
+    print stat_example
     import matplotlib.pyplot as plt
     for stat_name in stat_example:
         plt.figure()
@@ -109,6 +110,7 @@ if __name__ == "__main__":
                     to_plot = to_plot[to_plot.index <= args.limit]
                 to_plot.plot(label=split(model_directory)[1])
             except Exception as e:
+                print 'exception'
                 print stat_name, model_directory
                 print e
         plt.legend(loc='lower right').get_frame().set_alpha(0.6)

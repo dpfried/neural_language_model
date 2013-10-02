@@ -10,6 +10,7 @@ import tempfile
 from semantic_network import *
 from model import _default_word
 from admm import *
+from joint import *
 
 def attr_dict(filename):
     with open(filename) as f:

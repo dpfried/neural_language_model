@@ -3,7 +3,8 @@ import gzip, cPickle
 import pandas
 from semantic_network import *
 from model import _default_word
-from admm import *
+from admm import ADMMModel
+from joint import JointModel
 from utils import models_in_folder
 from os.path import split, join
 

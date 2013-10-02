@@ -9,11 +9,12 @@ import sys
 from model import EmbeddingLayer, HiddenLayer, EmbeddingTrainer
 
 class SemanticDistance(EmbeddingTrainer):
-    def __init__(self, rng, vocabulary, dimensions):
+    def __init__(self, rng, vocabulary, dimensions, initial_embeddings=None):
         super(SemanticDistance, self).__init__(rng, vocabulary, dimensions)
         self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,
                                               dimensions=self.dimensions,
-                                              sequence_length=1)
+                                              sequence_length=1,
+                                              initial_embeddings=initial_embeddings)
         self._build_functions()
 
     def similarity_symbolic(self, w1, w2):
@@ -76,7 +77,7 @@ class SemanticDistance(EmbeddingTrainer):
         return self.embedding_layer.embedding
 
 class SemanticNet(EmbeddingTrainer):
-    def __init__(self, rng, vocabulary, dimensions, n_hidden, L1_reg, L2_reg, other_params=None):
+    def __init__(self, rng, vocabulary, dimensions, n_hidden, L1_reg, L2_reg, other_params=None, initial_embeddings=None):
         super(SemanticNet, self).__init__(rng, vocabulary, dimensions)
         # initialize parameters
         if other_params is None:
@@ -88,13 +89,14 @@ class SemanticNet(EmbeddingTrainer):
         self.other_params = other_params
         self.blocks_trained = 0
 
-        self._build_layers()
+        self._build_layers(initial_embeddings=initial_embeddings)
         self._build_functions()
 
-    def _build_layers(self):
+    def _build_layers(self, initial_embeddings=None):
         self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,
                                               dimensions=self.dimensions,
-                                              sequence_length=2)
+                                              sequence_length=2,
+                                              initial_embeddings=initial_embeddings)
 
         self.hidden_layer = HiddenLayer(rng=self.rng,
                                         n_in=self.dimensions * 2,

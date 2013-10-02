@@ -3,9 +3,10 @@ import theano
 import theano.tensor as T
 from model import NLM
 from semantic_network import SemanticDistance
+from model import _default_word
 from ngrams import NgramReader
 import numpy as np
-from utils import grouper, sample_cumulative_discrete_distribution
+from utils import sample_cumulative_discrete_distribution
 import semantic_module
 import gzip, cPickle
 import sys
@@ -14,7 +15,7 @@ from utils import models_in_folder
 import random
 
 class ADMMModel(object):
-    def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, y_init=1.0, semantic_gd_rate=0.1, syntactic_gd_rate=0.1, normalize_y=False, syntactic_weight=0.5):
+    def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, y_init=0.0, semantic_gd_rate=0.1, syntactic_gd_rate=0.1, normalize_y=False, syntactic_weight=0.5):
         self.syntactic_model = syntactic_model
         self.semantic_model = semantic_model
         self.vocab_size = vocab_size
@@ -88,8 +89,14 @@ class ADMMModel(object):
         cost = self.syntactic_model.loss(w_correct_embeddings, w_error_embeddings)
         augmented_cost = self.syntactic_weight * cost + self.admm_penalty(w, v, y)
 
+        try:
+            syntactic_params = self.syntactic_model.params
+        except:
+            # since sometimes we're loading in an old model where params hadn't
+            # been set
+            syntactic_params = self.syntactic_model.get_params()
         updates = [(param, param - self.syntactic_gd_rate * T.grad(augmented_cost, param))
-                   for param in self.syntactic_model.params]
+                   for param in syntactic_params]
 
         dcorrect_embeddings = T.grad(augmented_cost, w_correct_embeddings)
         derror_embeddings = T.grad(augmented_cost, w_error_embeddings)
@@ -185,14 +192,15 @@ class ADMMModel(object):
         self.k += 1
 
     def get_embedding(self, *args, **kwargs):
-        return self.syntactic_model.get_embedding(*args, **kwargs)
-        # return np.concatenate([self.syntactic_model.get_embedding(*args, **kwargs), self.semantic_model.get_embedding(*args, **kwargs)])
+        # return self.syntactic_model.get_embedding(*args, **kwargs)
+        return np.concatenate([self.syntactic_model.get_embedding(*args, **kwargs), self.semantic_model.get_embedding(*args, **kwargs)])
         # return 0.5 * (self.syntactic_model.get_embedding(*args, **kwargs) + self.semantic_model.get_embedding(*args, **kwargs))
 
     def get_embeddings(self):
-        return self.syntactic_model.get_embeddings()
-        # return np.concatenate([self.syntactic_model.get_embeddings(), self.semantic_model.get_embeddings()], axis=1)
+        # return self.syntactic_model.get_embeddings()
+        return np.concatenate([self.syntactic_model.get_embeddings(), self.semantic_model.get_embeddings()], axis=1)
         # return 0.5 * (self.syntactic_model.get_embeddings() + self.semantic_model.get_embeddings())
+
 
 if __name__ == "__main__":
     import argparse
@@ -218,11 +226,14 @@ if __name__ == "__main__":
     parser.add_argument('--syntactic_blocks_to_run', type=int, default=1)
     parser.add_argument('--normalize_y', action='store_true')
     parser.add_argument('--syntactic_weight', type=float, default=0.5)
+    parser.add_argument('--existing_syntactic_model', help='use this existing trained model as the syntactic model')
+    parser.add_argument('--existing_semantic_model', help='use this existing trained model as the semantic model')
     args = vars(parser.parse_args())
+
+    base_dir = args['base_dir']
 
     # see if this model's already been run. If it has, load it and get the
     # params
-    base_dir = args['base_dir']
     models = models_in_folder(base_dir)
     if models:
         model_num = max(models.keys())
@@ -247,17 +258,25 @@ if __name__ == "__main__":
     random.seed(args['random_seed'])
     if not model_loaded:
         print 'constructing model...'
-        _syntactic_model = NLM(rng=rng,
-                            vocabulary=vocabulary,
-                            dimensions=args['dimensions'],
-                            sequence_length=args['sequence_length'],
-                            n_hidden=args['n_hidden'],
-                            L1_reg=0,
-                            L2_reg=0)
+        if args['existing_syntactic_model']:
+            with gzip.open(args['existing_syntactic_model'], 'rb') as f:
+                _syntactic_model = cPickle.load(f)
+        else:
+            _syntactic_model = NLM(rng=rng,
+                                vocabulary=vocabulary,
+                                dimensions=args['dimensions'],
+                                sequence_length=args['sequence_length'],
+                                n_hidden=args['n_hidden'],
+                                L1_reg=0,
+                                L2_reg=0)
 
-        _semantic_model = SemanticDistance(rng=rng,
-                                        vocabulary=vocabulary,
-                                        dimensions=args['dimensions'])
+        if args['existing_semantic_model']:
+            with gzip.open(args['existing_semantic_model'], 'rb') as f:
+                _semantic_model = cPickle.load(f)
+        else:
+            _semantic_model = SemanticDistance(rng=rng,
+                                            vocabulary=vocabulary,
+                                            dimensions=args['dimensions'])
 
         model = ADMMModel(syntactic_model=_syntactic_model,
                         semantic_model=_semantic_model,
@@ -291,6 +310,7 @@ if __name__ == "__main__":
     sampling = args['sampling']
 
     while True:
+        print 'model rho', model.rho
         model.increase_k()
         stats_for_k = {}
         # syntactic update step

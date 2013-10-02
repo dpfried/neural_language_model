@@ -66,7 +66,7 @@ class EmbeddingContainer(EmbeddingTrainer):
         return self.embeddings
 
 class EmbeddingLayer(object):
-    def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01):
+    def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01, initial_embeddings=None):
         """ Initialize the parameters of the embedding layer
 
         :type rng: nympy.random.RandomState
@@ -88,13 +88,17 @@ class EmbeddingLayer(object):
         self.dimensions = dimensions
         self.sequence_length = sequence_length
 
-        initial_embedding = np.asarray(rng.uniform(
-            low=-initial_embedding_range / 2.,
-            high=initial_embedding_range / 2.,
-            size=(self.vocab_size, self.dimensions)),
-            dtype=theano.config.floatX)
+        embedding_shape = (self.vocab_size, self.dimensions)
+        if initial_embeddings is None:
+            initial_embeddings = np.asarray(rng.uniform(
+                    low=-initial_embedding_range / 2.,
+                    high=initial_embedding_range / 2.,
+                    size=embedding_shape),
+                dtype=theano.config.floatX)
+        else:
+            assert initial_embeddings.shape == embedding_shape
 
-        self.embedding = initial_embedding
+        self.embedding = initial_embeddings
         # self.embedding = theano.shared(value=np.eye(vocab_size, dimensions), name='embedding')
 
         self.params = []
@@ -198,7 +202,7 @@ class HiddenLayer(object):
         return self.activation(T.dot(input, self.W) + self.b)
 
 class NLM(EmbeddingTrainer):
-    def __init__(self, rng, vocabulary,  dimensions,  sequence_length, n_hidden, L1_reg, L2_reg, other_params=None):
+    def __init__(self, rng, vocabulary,  dimensions,  sequence_length, n_hidden, L1_reg, L2_reg, other_params=None, initial_embeddings=None):
         super(NLM, self).__init__(rng, vocabulary, dimensions)
         # initialize parameters
         if other_params is None:
@@ -210,7 +214,7 @@ class NLM(EmbeddingTrainer):
         self.other_params = other_params
         self.blocks_trained = 0
 
-        self._make_layers()
+        self._make_layers(initial_embeddings=initial_embeddings)
         self._make_functions()
 
     # this is ugly, use it because we didn't always save the vocab
@@ -241,7 +245,7 @@ class NLM(EmbeddingTrainer):
             self._symbol_to_word[0] = '*UNKNOWN*'
             return self._symbol_to_word
 
-    def _make_layers(self):
+    def _make_layers(self, initial_embeddings=None):
         self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,
                                               dimensions=self.dimensions,
                                               sequence_length=self.sequence_length)
@@ -253,13 +257,16 @@ class NLM(EmbeddingTrainer):
 
         self.output_layer = LinearScalarResponse(n_in=self.n_hidden)
 
-        self.params = self.hidden_layer.params + self.output_layer.params
+        self.params = self.get_params()
 
         self.layer_stack = [self.hidden_layer, self.output_layer]
 
         self.L1 = abs(self.hidden_layer.W).sum() + abs(self.output_layer.W).sum()
 
         self.L2_sqr = (self.hidden_layer.W ** 2).sum() + (self.output_layer.W ** 2).sum()
+
+    def get_params(self):
+        return self.hidden_layer.params + self.output_layer.params
 
     def score_symbolic(self, sequence_embedding):
         return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, sequence_embedding)

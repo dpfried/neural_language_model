@@ -2,7 +2,7 @@ from os.path import join
 from utils import models_in_folder
 import json
 import cPickle, gzip
-from admm import ADMMModel
+from admm import ADMMModel, AnnealingADMMModel
 from semantic_network import SemanticDistance, SemanticNet
 from model import _default_word # required to unpickle because some old models have this function referenced within the clas
 from joint import JointModel

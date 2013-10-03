@@ -75,6 +75,10 @@ if __name__ == "__main__":
         ("Y-norm (pseudo avg)", lambda frame, _: frame.y_norm / (np.sqrt(50000.))),
         ("residual norm (pseudo avg)", lambda frame, _: frame.res_norm / (np.sqrt(50000.))),
         ("total loss (augmented)", lambda frame, _: frame.semantic_mean_augmented + frame.syntactic_mean_augmented),
+        ("syntactic loss", lambda frame, _: frame.syntactic_mean),
+        ("semantic loss", lambda frame, _: frame.semantic_mean),
+        ("syntactic validation mean score", lambda frame, _: frame.syntactic_validation_mean_score),
+        ("semantic validation mean jaccard", lambda frame, _: frame.semantic_validation_mean_jaccard),
     ]:
         plt.figure()
         plt.title(plot_tile)

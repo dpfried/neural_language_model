@@ -3,6 +3,7 @@ from itertools import izip_longest
 import re
 import glob
 import os
+import itertools
 
 def sample_cumulative_discrete_distribution(cumulative_dist, rng=None):
     """
@@ -32,3 +33,11 @@ def models_in_folder(folder):
     model_fnames = glob.glob(get_model_fname('*'))
     return dict((int(MODEL_NUMBER_EXTRACTOR.match(fname).groups()[0]), fname)
                 for fname in model_fnames)
+
+def line_styles(number_of_lines):
+    colors = 'bgrcmy'
+    lines = ['-', '--']
+    if number_of_lines > len(colors):
+        return itertools.imap(lambda strs: ''.join(strs), itertools.cycle(itertools.product(colors, lines)))
+    else:
+        return colors

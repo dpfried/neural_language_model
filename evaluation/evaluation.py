@@ -5,7 +5,7 @@ from semantic_network import *
 from model import _default_word
 from admm import ADMMModel, AnnealingADMMModel
 from joint import JointModel
-from utils import models_in_folder
+from utils import models_in_folder, line_styles
 from os.path import split, join
 
 def make_series(model_root_folder,
@@ -13,17 +13,22 @@ def make_series(model_root_folder,
                 normalize_components=False,
                 plot_interval=100,
                 limit=None,
+                no_new=False,
                 **run_model_args):
     store_fname = join(model_root_folder, 'eval-%s-%s.pkl' % (include_synsets, normalize_components))
     try:
         stats = pandas.read_pickle(store_fname)
     except:
         stats = pandas.DataFrame()
+    if no_new:
+        return stats
 
     models = models_in_folder(model_root_folder)
     model_nums = sorted(models.keys())
 
-    to_plot = [n for n in model_nums if n % plot_interval == 0]
+    latest_num = model_nums[-1] if model_nums else -1
+
+    to_plot = [n for n in model_nums if n % plot_interval == 0 and n != latest_num]
     if 1 in model_nums:
         to_plot = [1] + to_plot
     if limit is not None:
@@ -82,6 +87,7 @@ if __name__ == "__main__":
     parser.add_argument('--wordsim_root', help="folder containing wordsim353 csv file", default="/home/dfried/data/wordsim/combined.csv")
 
     parser.add_argument('--limit', type=int, default=None)
+    parser.add_argument('--no_new', action='store_true')
     parser.add_argument('--save_graphs_base')
     args = parser.parse_args()
 
@@ -103,12 +109,13 @@ if __name__ == "__main__":
     for stat_name in stat_example:
         plt.figure()
         plt.title(stat_name)
-        for model_directory, data in all_stats.items():
+        styles = line_styles(len(all_stats))
+        for (model_directory, data), style in zip(sorted(all_stats.items()), styles):
             try:
                 to_plot = data[stat_name]
                 if args.limit:
                     to_plot = to_plot[to_plot.index <= args.limit]
-                to_plot.plot(label=split(model_directory)[1])
+                to_plot.plot(label=split(model_directory)[1], style=style)
             except Exception as e:
                 print 'exception'
                 print stat_name, model_directory

@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from os.path import join, split
 import json
-import itertools
+from utils import line_styles
 
 def plot_stats_function(function, statss, paramss, labels=None, output_file=None):
     """
@@ -13,18 +13,14 @@ def plot_stats_function(function, statss, paramss, labels=None, output_file=None
     kwargss is a list of dictionaries, each of which will be passed to the plot function for the respective result of
     the function
     """
-    stats_label = ""
-    colors = 'bgrcmy'
-    lines = ['-', '--']
-    if len(statss) > len(colors):
-        styles = itertools.imap(lambda strs: ''.join(strs), itertools.cycle(itertools.product(colors, lines)))
-    else:
-        styles = colors
-    print list(itertools.islice(styles, 5))
+    styles = line_styles(len(statss))
     for i, (stats, params, style) in enumerate(zip(statss, paramss, styles)):
         if labels:
             label = labels[i]
-        function(stats, params).plot(style=style, label=label)
+        try:
+            function(stats, params).plot(style=style, label=label)
+        except Exception as e:
+            print e
     plt.legend(loc='best').get_frame().set_alpha(0.6)
     if output_file:
         plt.savefig(output_file, bbox_inches='tight')
@@ -80,7 +76,10 @@ if __name__ == "__main__":
         ("syntactic validation mean score", lambda frame, _: frame.syntactic_validation_mean_score),
         ("semantic validation mean jaccard", lambda frame, _: frame.semantic_validation_mean_jaccard),
     ]:
-        plt.figure()
-        plt.title(plot_tile)
-        plot_stats_function(fn, stats, params, [split(d)[1] for d in args.model_directories])
+        try:
+            plt.figure()
+            plt.title(plot_tile)
+            plot_stats_function(fn, stats, params, [split(d)[1] for d in args.model_directories])
+        except Exception as e:
+            print e
     plt.show()

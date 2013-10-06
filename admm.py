@@ -1,3 +1,4 @@
+import json
 import pandas
 import theano
 import theano.tensor as T
@@ -273,7 +274,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('base_dir', help="file to dump model and stats in")
-    parser.add_argument('--sampling', default='semantic_nearest', help='semantic_nearest | embedding_nearest | random')
+    parser.add_argument('--sampling', default='random', help='semantic_nearest | embedding_nearest | random')
     parser.add_argument('--vocab_size', type=int, default=50000)
     parser.add_argument('--train_proportion', type=float, default=0.95)
     parser.add_argument('--test_proportion', type=float, default=0.0005)
@@ -330,6 +331,10 @@ if __name__ == "__main__":
         args['base_dir'] = base_dir
     else:
         model_loaded = False
+        # dump the params
+        with open(os.path.join(args['base_dir'], 'params.json'), 'w') as f:
+            json.dump(args, f)
+
 
     replacement_column_index = args['sequence_length'] / 2
 
@@ -341,11 +346,22 @@ if __name__ == "__main__":
     data_rng = np.random.RandomState(args['random_seed'])
     validation_rng = np.random.RandomState(args['random_seed'] + 1)
     random.seed(args['random_seed'])
+
+    # construct the admm, possibly using some existing semantic or syntactic
+    # model, possibly annealing
     if not model_loaded:
         print 'constructing model...'
         if args['existing_syntactic_model']:
+            # check to see if the model to load is itself an ADMM. if it is,
+            # pull out the syntactic model, otherwise treat it as its own
+            # syntactic model
             with gzip.open(args['existing_syntactic_model'], 'rb') as f:
-                _syntactic_model = cPickle.load(f)
+                loaded_model = cPickle.load(f)
+                if issubclass(type(loaded_model), ADMMModel):
+                    print 'pulling syntactic from existing model'
+                    _syntactic_model = loaded_model.syntactic_model
+                else:
+                    _syntactic_model = loaded_model
         else:
             _syntactic_model = NLM(rng=rng,
                                 vocabulary=vocabulary,
@@ -356,8 +372,16 @@ if __name__ == "__main__":
                                 L2_reg=0)
 
         if args['existing_semantic_model']:
+            # check to see if the model to load is itself an ADMM. if it is,
+            # pull out the semantic model, otherwise treat it as its own
+            # semantic model
             with gzip.open(args['existing_semantic_model'], 'rb') as f:
-                _semantic_model = cPickle.load(f)
+                loaded_model = cPickle.load(f)
+                if issubclass(type(loaded_model), ADMMModel):
+                    print 'pulling semantic from existing model'
+                    _semantic_model = loaded_model.semantic_model
+                else:
+                    _semantic_model = loaded_model
         else:
             _semantic_model = SemanticDistance(rng=rng,
                                             vocabulary=vocabulary,

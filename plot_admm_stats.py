@@ -51,13 +51,20 @@ if __name__ == "__main__":
     parser.add_argument('model_directories', nargs='+')
     args = parser.parse_args()
 
-    stats = [pandas.read_pickle(join(model_dir, 'stats.pkl'))
-             for model_dir in args.model_directories]
+    stats = []
     params = []
-
     for model_dir in args.model_directories:
-        with open(join(model_dir, 'params.json')) as f:
-            params.append(json.load(f))
+        try:
+            _stats = pandas.read_pickle(join(model_dir, 'stats.pkl'))
+            with open(join(model_dir, 'params.json')) as f:
+                _params = json.load(f)
+
+        except Exception as e:
+            print e
+            continue
+        stats.append(_stats)
+        params.append(_params)
+
     def total_loss(frame, params):
         if 'syntactic_weight' in params:
             syn_w = params['syntactic_weight']

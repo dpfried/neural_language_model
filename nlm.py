@@ -7,8 +7,9 @@ from utils import sample_cumulative_discrete_distribution
 from nltk.corpus import wordnet
 import pandas
 import cPickle
+import theano
 
-def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None):
+def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None, mode='FAST_RUN'):
     print '... building the model'
 
     if rng is None:
@@ -26,7 +27,8 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
                     sequence_length=sequence_length,
                     n_hidden=n_hidden,
                     learning_rate=learning_rate,
-                    other_params=other_params)
+                    other_params=other_params,
+                    mode=mode)
 
     # replace the middle word in the ngram when producing corrupt examples
     replacement_column_index = sequence_length / 2
@@ -44,74 +46,80 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
     # completed trained a training block
     testing_block = ngram_reader.testing_block()
 
-    while block_count < blocks_to_run:
-        block_count += 1
-        costs = []
-        training_block = ngram_reader.training_block(rng.random_sample())
-        block_size = training_block.shape[0]
-        # sample block_size ngrams from the training block, by frequency
-        # in the original corpus. Using block_size as the sample size is
-        # pretty arbitrary
-        stats_for_block = {}
-        for count in xrange(block_size):
-            if count % print_freq == 0:
-                sys.stdout.write('\rblock %i: training instance %d of %d (%f %%)\r' % (block_count, count, block_size, 100. * count / block_size))
-                sys.stdout.flush()
-            train_index = sample_cumulative_discrete_distribution(training_block[:,-1])
-            correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], replacement_column_index=replacement_column_index, rng=rng)
-            # calculate the weight as a function of the correct symbols and error symbols
-            cost = nlm_model.train(correct_symbols, error_symbols) # * ngram_frequency
-            costs.append(cost)
-
-        this_training_cost = np.mean(costs)
-        # so that when we pickle the model we have a record of how many blocks
-        # it's been trained on
-        nlm_model.blocks_trained = block_count
-
-        if block_count % block_test_frequency == 0:
-            test_values = []
-            test_frequencies = []
-            n_test_instances = testing_block.shape[0]
-            for test_index in xrange(n_test_instances):
-                if test_index % print_freq == 0:
-                    sys.stdout.write('\rtesting instance %d of %d (%f %%)\r' % (test_index, n_test_instances, 100. * test_index / n_test_instances))
+    try:
+        while block_count < blocks_to_run:
+            block_count += 1
+            costs = []
+            training_block = ngram_reader.training_block(rng.random_sample())
+            block_size = training_block.shape[0]
+            # sample block_size ngrams from the training block, by frequency
+            # in the original corpus. Using block_size as the sample size is
+            # pretty arbitrary
+            stats_for_block = {}
+            for count in xrange(block_size):
+                if count % print_freq == 0:
+                    sys.stdout.write('\rblock %i: training instance %d of %d (%f %%)\r' % (block_count, count, block_size, 100. * count / block_size))
                     sys.stdout.flush()
-                correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(testing_block[test_index], replacement_column_index=replacement_column_index, rng=rng)
-                test_values.append(nlm_model.score(correct_symbols) - nlm_model.score(error_symbols))
-                test_frequencies.append(ngram_frequency)
-            test_mean = np.mean(test_values)
-            stats_for_block['test_mean'] = test_mean
-            test_weighted_mean = np.mean(np.array(test_values) * np.array(test_frequencies))
-            stats_for_block['test_weighted_mean'] = test_weighted_mean
-            test_score_str = '%f' % test_mean
-            test_wt_score_str = '%f' % test_weighted_mean
-        else:
-            test_score_str = '-----'
-            test_wt_score_str = '-----'
+                train_index = sample_cumulative_discrete_distribution(training_block[:,-1])
+                correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], replacement_column_index=replacement_column_index, rng=rng)
+                # calculate the weight as a function of the correct symbols and error symbols
+                cost = nlm_model.train(correct_symbols, error_symbols) # * ngram_frequency
+                costs.append(cost)
 
-        current_time = time.clock()
-        stats_for_block['time'] = current_time - last_time
-        stats_for_block['training_cost'] = this_training_cost
-        sys.stdout.write('\033[k\r')
-        sys.stdout.flush()
-        print 'block %i \t training cost %f %% \t test score %s \t test wt score %s \t %f seconds' % (block_count, this_training_cost, test_score_str, test_wt_score_str, current_time - last_time)
-        last_time = current_time
+            this_training_cost = np.mean(costs)
+            # so that when we pickle the model we have a record of how many blocks
+            # it's been trained on
+            nlm_model.blocks_trained = block_count
 
-        all_stats = pandas.concat([all_stats, pandas.DataFrame(stats_for_block, index=[block_count])])
+            if block_count % block_test_frequency == 0:
+                test_values = []
+                test_frequencies = []
+                n_test_instances = testing_block.shape[0]
+                for test_index in xrange(n_test_instances):
+                    if test_index % print_freq == 0:
+                        sys.stdout.write('\rtesting instance %d of %d (%f %%)\r' % (test_index, n_test_instances, 100. * test_index / n_test_instances))
+                        sys.stdout.flush()
+                    correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(testing_block[test_index], replacement_column_index=replacement_column_index, rng=rng)
+                    test_values.append(nlm_model.score(correct_symbols) - nlm_model.score(error_symbols))
+                    test_frequencies.append(ngram_frequency)
+                test_mean = np.mean(test_values)
+                stats_for_block['test_mean'] = test_mean
+                test_weighted_mean = np.mean(np.array(test_values) * np.array(test_frequencies))
+                stats_for_block['test_weighted_mean'] = test_weighted_mean
+                test_score_str = '%f' % test_mean
+                test_wt_score_str = '%f' % test_weighted_mean
+            else:
+                test_score_str = '-----'
+                test_wt_score_str = '-----'
 
-        if save_model_basename and block_count % save_model_frequency == 0:
-            sys.stdout.write('dumping to file..\r')
-            sys.stdout.flush()
-            with gzip.open('%s-%d.pkl.gz' % (save_model_basename, block_count), 'wb') as f:
-                cPickle.dump(nlm_model, f)
+            current_time = time.clock()
+            stats_for_block['time'] = current_time - last_time
+            stats_for_block['training_cost'] = this_training_cost
             sys.stdout.write('\033[k\r')
             sys.stdout.flush()
+            print 'block %i \t training cost %f %% \t test score %s \t test wt score %s \t %f seconds' % (block_count, this_training_cost, test_score_str, test_wt_score_str, current_time - last_time)
+            last_time = current_time
 
-        if stats_output_file:
-            print 'dumping stats to file %s' % stats_output_file
-            all_stats.to_pickle(stats_output_file)
+            all_stats = pandas.concat([all_stats, pandas.DataFrame(stats_for_block, index=[block_count])])
 
-    return nlm_model
+            if save_model_basename and block_count % save_model_frequency == 0:
+                sys.stdout.write('dumping to file..\r')
+                sys.stdout.flush()
+                with gzip.open('%s-%d.pkl.gz' % (save_model_basename, block_count), 'wb') as f:
+                    cPickle.dump(nlm_model, f)
+                sys.stdout.write('\033[k\r')
+                sys.stdout.flush()
+
+            if stats_output_file:
+                print 'dumping stats to file %s' % stats_output_file
+                all_stats.to_pickle(stats_output_file)
+
+        return nlm_model
+    finally:
+        try:
+            mode.print_summary()
+        except:
+            pass
 
 if __name__ == '__main__':
     import argparse
@@ -128,7 +136,14 @@ if __name__ == '__main__':
     parser.add_argument('--test_proportion', type=float, help="percentage of data to use as testing", default=0.0001)
     parser.add_argument('--save_model_frequency', type=int, help="save model every nth iteration", default=10)
     parser.add_argument('--stats_output_file', type=str, help="save stats to this file")
+    parser.add_argument('--profile', action='store_true')
     args = parser.parse_args()
+
+    if args.profile:
+        from theano import ProfileMode
+        theano_mode = theano.ProfileMode(optimizer='fast_run', linker=theano.gof.OpWiseCLinker())
+    else:
+        theano_mode = 'FAST_RUN'
 
     ngram_reader = NgramReader(args.ngram_filename, vocab_size=args.vocab_size, train_proportion=args.train_proportion, test_proportion=args.test_proportion)
     print 'corpus contains %i ngrams' % (ngram_reader.number_of_ngrams)
@@ -144,6 +159,7 @@ if __name__ == '__main__':
         'blocks_to_run':np.inf,
         'stats_output_file': args.stats_output_file,
         'save_model_frequency': args.save_model_frequency,
+        'mode': theano_mode
     }
     other_params = {
         'ngram_filename': args.ngram_filename,

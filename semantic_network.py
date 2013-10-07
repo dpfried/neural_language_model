@@ -9,12 +9,14 @@ import sys
 from model import EmbeddingLayer, HiddenLayer, EmbeddingTrainer
 
 class SemanticDistance(EmbeddingTrainer):
-    def __init__(self, rng, vocabulary, dimensions, initial_embeddings=None):
+    def __init__(self, rng, vocabulary, dimensions, initial_embeddings=None, mode='FAST_RUN'):
         super(SemanticDistance, self).__init__(rng, vocabulary, dimensions)
+        self.mode = mode
         self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,
                                               dimensions=self.dimensions,
                                               sequence_length=1,
-                                              initial_embeddings=initial_embeddings)
+                                              initial_embeddings=initial_embeddings,
+                                              mode=mode)
         self._build_functions()
 
     def similarity_symbolic(self, w1, w2):
@@ -44,10 +46,12 @@ class SemanticDistance(EmbeddingTrainer):
         outputs = dembeddings + [cost]
 
         self.training_function = theano.function(inputs=inputs,
-                                                 outputs=outputs)
+                                                 outputs=outputs,
+                                                 mode=self.mode)
 
         self.similarity = theano.function(inputs=embeddings,
-                                           outputs=self.similarity_symbolic(w1_embedding, w2_embedding))
+                                          outputs=self.similarity_symbolic(w1_embedding, w2_embedding),
+                                          mode=self.mode)
 
         # no params to update (embeddings are handled separately)
         self.params = []
@@ -149,10 +153,12 @@ class SemanticNet(EmbeddingTrainer):
 
         self.training_function = theano.function(inputs=inputs,
                                                  outputs=outputs,
-                                                 updates=updates)
+                                                 updates=updates,
+                                                 mode=self.mode)
 
         self.similarity = theano.function(inputs=embeddings,
-                                           outputs=self.similarity_symbolic(self.embedding_layer.flatten_embeddings(embeddings)))
+                                           outputs=self.similarity_symbolic(self.embedding_layer.flatten_embeddings(embeddings)),
+                                          mode=self.mode)
 
     def train(self, w1_index, w2_index, actual_similarity, weighted_learning_rate=0.01):
         w1_embedding = self.embedding_layer.embeddings_from_symbols(w1_index)

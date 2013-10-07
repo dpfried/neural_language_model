@@ -8,7 +8,7 @@ from nltk.corpus import wordnet
 import pandas
 import cPickle
 
-def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, L1_reg=0.00, L2_reg=0.0000, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None):
+def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_rate=0.01, save_model_basename=None, blocks_to_run=np.inf, save_model_frequency=10, other_params={}, stats_output_file=None):
     print '... building the model'
 
     if rng is None:
@@ -25,8 +25,7 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
                     dimensions=dimensions,
                     sequence_length=sequence_length,
                     n_hidden=n_hidden,
-                    L1_reg=L1_reg,
-                    L2_reg=L2_reg,
+                    learning_rate=learning_rate,
                     other_params=other_params)
 
     # replace the middle word in the ngram when producing corrupt examples
@@ -61,7 +60,7 @@ def test_nlm(vocab_size, dimensions, n_hidden, ngram_reader, rng=None, learning_
             train_index = sample_cumulative_discrete_distribution(training_block[:,-1])
             correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], replacement_column_index=replacement_column_index, rng=rng)
             # calculate the weight as a function of the correct symbols and error symbols
-            cost, correct_updates, error_updates = nlm_model.train(correct_symbols, error_symbols, learning_rate) # * ngram_frequency
+            cost = nlm_model.train(correct_symbols, error_symbols) # * ngram_frequency
             costs.append(cost)
 
         this_training_cost = np.mean(costs)
@@ -118,17 +117,15 @@ if __name__ == '__main__':
     import argparse
     import gzip
     parser = argparse.ArgumentParser()
-    parser.add_argument('--ngram_filename', help="hdf5 file to load ngrams from")
+    parser.add_argument('--ngram_filename', help="hdf5 file to load ngrams from", default='/cl/nldata/books_google_ngrams_eng/5grams_size3.hd5')
     parser.add_argument('--model_basename', help="basename to write model to")
-    parser.add_argument('--vocab_size', type=int, help="number of top words to include", default=5000)
+    parser.add_argument('--vocab_size', type=int, help="number of top words to include", default=50000)
     parser.add_argument('--rng_seed', type=int, help="random number seed", default=1234)
-    parser.add_argument('--dimensions', type=int, help="dimension of word representations", default=20)
-    parser.add_argument('--n_hidden', type=int, help="number of hidden nodes", default=30)
-    parser.add_argument('--L1_reg', type=float, help="L1 regularization constant", default=0.0)
-    parser.add_argument('--L2_reg', type=float, help="L2 regularization constant", default=0.0)
+    parser.add_argument('--dimensions', type=int, help="dimension of word representations", default=50)
+    parser.add_argument('--n_hidden', type=int, help="number of hidden nodes", default=200)
     parser.add_argument('--learning_rate', type=float, help="L2 regularization constant", default=0.01)
     parser.add_argument('--train_proportion', type=float, help="percentage of data to use as training", default=0.95)
-    parser.add_argument('--test_proportion', type=float, help="percentage of data to use as testing", default=None)
+    parser.add_argument('--test_proportion', type=float, help="percentage of data to use as testing", default=0.0001)
     parser.add_argument('--save_model_frequency', type=int, help="save model every nth iteration", default=10)
     parser.add_argument('--stats_output_file', type=str, help="save stats to this file")
     args = parser.parse_args()
@@ -142,8 +139,6 @@ if __name__ == '__main__':
         'vocab_size':ngram_reader.vocab_size,
         'dimensions':args.dimensions,
         'n_hidden':args.n_hidden,
-        'L1_reg':args.L1_reg,
-        'L2_reg':args.L2_reg,
         'save_model_basename':args.model_basename,
         'learning_rate': args.learning_rate,
         'blocks_to_run':np.inf,

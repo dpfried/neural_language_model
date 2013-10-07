@@ -107,7 +107,7 @@ class NgramReader(object):
         """
         # last two columns are reserved for frequency of ngram and cumulative
         # frequency, respectively
-        correct_symbols = row[:-2]
+        correct_symbols = row[:-2].astype('int32')
         ngram_frequency = row[-2]
         # get a list of symbols representing a corrupted ngram
         # TODO: maybe move add_noise_to_symbols from ngram_reader to this file?

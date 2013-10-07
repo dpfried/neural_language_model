@@ -16,7 +16,7 @@ from utils import models_in_folder
 import random
 
 class ADMMModel(object):
-    def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, y_init=0.0, semantic_gd_rate=0.1, syntactic_gd_rate=0.1, normalize_y=False, syntactic_weight=0.5):
+    def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, y_init=0.0, semantic_gd_rate=0.1, syntactic_gd_rate=0.1, normalize_y=False, syntactic_weight=0.5, mode='FAST_RUN'):
         self.syntactic_model = syntactic_model
         self.semantic_model = semantic_model
         self.vocab_size = vocab_size
@@ -29,11 +29,13 @@ class ADMMModel(object):
         self.k = 0
 
         # the lagrangian
-        self.y = np.ones((vocab_size,syntactic_model.dimensions)) * y_init
+        self.y = (np.ones((vocab_size,syntactic_model.dimensions)) * y_init).astype(theano.config.floatX)
 
         # self.y = theano.shared(value=y_init, name='y')
-        self.semantic_gd_rate = theano.shared(value=semantic_gd_rate, name='semantic_gd_rate')
-        self.syntactic_gd_rate = theano.shared(value=syntactic_gd_rate, name='syntactic_gd_rate')
+        self.semantic_gd_rate = theano.shared(value=np.cast[theano.config.floatX](semantic_gd_rate), name='semantic_gd_rate')
+        self.syntactic_gd_rate = theano.shared(value=np.cast[theano.config.floatX](syntactic_gd_rate), name='syntactic_gd_rate')
+
+        self.mode = mode
 
         self._build_functions()
 
@@ -58,11 +60,11 @@ class ADMMModel(object):
 
     @property
     def syntactic_embedding(self):
-        return self.syntactic_model.embedding_layer.embedding
+        return self.syntactic_model.embedding_layer.embeddings.get_value()
 
     @property
     def semantic_embedding(self):
-        return self.semantic_model.embedding_layer.embedding
+        return self.semantic_model.embedding_layer.embeddings.get_value()
 
     def make_theano_syntactic_update(self):
         # build the update functions for w, the embeddings of the syntactic
@@ -95,6 +97,7 @@ class ADMMModel(object):
             # since sometimes we're loading in an old model where params hadn't
             # been set
             syntactic_params = self.syntactic_model.get_params()
+        print [(param, param.dtype) for param in syntactic_params]
         updates = [(param, param - self.syntactic_gd_rate * T.grad(augmented_cost, param))
                    for param in syntactic_params]
 
@@ -103,7 +106,8 @@ class ADMMModel(object):
 
         return theano.function(inputs=w_embeddings + v_embeddings + y_weights,
                                outputs=dcorrect_embeddings + derror_embeddings + [cost, augmented_cost],
-                               updates=updates)
+                               updates=updates,
+                               mode=self.mode)
 
     def update_syntactic(self, correct_symbols, error_symbols):
         syntactic_correct = [self.syntactic_embedding[i] for i in correct_symbols]
@@ -154,7 +158,8 @@ class ADMMModel(object):
 
         return theano.function(inputs=[w1, w2, v1, v2, y1, y2, actual_sim],
                                outputs=[dv1, dv2, cost, augmented_cost],
-                               updates=updates)
+                               updates=updates,
+                               mode=self.mode)
 
     def update_semantic(self, index1, index2, actual_similarity):
         w1 = self.syntactic_embedding[index1]
@@ -213,7 +218,7 @@ class ADMMModel(object):
                 f.write('%s %s\n' % (self.symbol_to_word[index], vector_string_rep))
 
 class AnnealingADMMModel(ADMMModel):
-    def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, semantic_annealing_T, semantic_gd_initial_rate, syntactic_annealing_T, syntactic_gd_initial_rate, normalize_y=False, y_init=0.0, syntactic_weight=0.5):
+    def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, semantic_annealing_T, semantic_gd_initial_rate, syntactic_annealing_T, syntactic_gd_initial_rate, normalize_y=False, y_init=0.0, syntactic_weight=0.5, mode='FAST_RUN'):
         super(AnnealingADMMModel, self).__init__(syntactic_model,
                                                  semantic_model,
                                                  vocab_size,
@@ -223,7 +228,8 @@ class AnnealingADMMModel(ADMMModel):
                                                  semantic_gd_rate=semantic_gd_initial_rate,
                                                  syntactic_gd_rate=syntactic_gd_initial_rate,
                                                  normalize_y=normalize_y,
-                                                 syntactic_weight=syntactic_weight)
+                                                 syntactic_weight=syntactic_weight,
+                                                 mode=mode)
         self.semantic_gd_initial_rate = semantic_gd_initial_rate
         self.syntactic_gd_initial_rate = syntactic_gd_initial_rate
         self.semantic_annealing_T = semantic_annealing_T
@@ -305,7 +311,14 @@ if __name__ == "__main__":
     parser.add_argument('--sem_validation_num_to_test', type=int, default=500, help='in semantic validation after each round, the number of test words to sample')
     parser.add_argument('--dont_run_semantic', action='store_true')
     parser.add_argument('--dont_run_syntactic', action='store_true')
+    parser.add_argument('--profile', action='store_true')
     args = vars(parser.parse_args())
+
+    if args['profile']:
+        from theano import ProfileMode
+        theano_mode = theano.ProfileMode(optimizer='fast_run', linker=theano.gof.OpWiseCLinker())
+    else:
+        theano_mode = 'FAST_RUN'
 
     # if we're only running semantic or syntactic, rho and y init must be 0 to
     # isolate the loss function to the syntactic or semantic loss
@@ -369,7 +382,8 @@ if __name__ == "__main__":
                                 sequence_length=args['sequence_length'],
                                 n_hidden=args['n_hidden'],
                                 L1_reg=0,
-                                L2_reg=0)
+                                L2_reg=0,
+                                   mode=theano_mode)
 
         if args['existing_semantic_model']:
             # check to see if the model to load is itself an ADMM. if it is,
@@ -384,8 +398,9 @@ if __name__ == "__main__":
                     _semantic_model = loaded_model
         else:
             _semantic_model = SemanticDistance(rng=rng,
-                                            vocabulary=vocabulary,
-                                            dimensions=args['dimensions'])
+                                               vocabulary=vocabulary,
+                                               dimensions=args['dimensions'],
+                                               mode=theano_mode)
 
         if args['annealing']:
             print 'annealing'
@@ -400,18 +415,20 @@ if __name__ == "__main__":
                                        syntactic_gd_initial_rate=args['syntactic_gd_rate'],
                                        normalize_y=args['normalize_y'],
                                        y_init=args['y_init'],
-                                       syntactic_weight=args['syntactic_weight'])
+                                       syntactic_weight=args['syntactic_weight'],
+                                       mode=theano_mode)
         else:
             model = ADMMModel(syntactic_model=_syntactic_model,
-                            semantic_model=_semantic_model,
-                            vocab_size=args['vocab_size'],
-                            rho=args['rho'],
-                            other_params=args,
-                            y_init=args['y_init'],
-                            semantic_gd_rate=args['semantic_gd_rate'],
-                            syntactic_gd_rate=args['syntactic_gd_rate'],
-                            normalize_y=args['normalize_y'],
-                            syntactic_weight=args['syntactic_weight'])
+                              semantic_model=_semantic_model,
+                              vocab_size=args['vocab_size'],
+                              rho=args['rho'],
+                              other_params=args,
+                              y_init=args['y_init'],
+                              semantic_gd_rate=args['semantic_gd_rate'],
+                              syntactic_gd_rate=args['syntactic_gd_rate'],
+                              normalize_y=args['normalize_y'],
+                              syntactic_weight=args['syntactic_weight'],
+                              mode=theano_mode)
 
     print 'loading semantic similarities'
     word_similarity = semantic_module.WordSimilarity(vocabulary, args['word_similarity_file'], memmap_filename=args['word_similarity_memmap'])
@@ -453,6 +470,9 @@ if __name__ == "__main__":
                     if count % print_freq == 0:
                         sys.stdout.write('\rk %i b%i: ngram %d of %d' % (model.k, block_num, count, block_size))
                         sys.stdout.flush()
+                        if args['profile'] and count > 0:
+                            print
+                            theano_mode.print_summary()
                     train_index = sample_cumulative_discrete_distribution(training_block[:,-1], rng=data_rng)
                     correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], rng=data_rng)
                     cost, augmented_cost, correct_updates, error_updates = model.update_syntactic(correct_symbols, error_symbols)

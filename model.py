@@ -63,10 +63,10 @@ class EmbeddingContainer(EmbeddingTrainer):
         self.embeddings = embeddings
 
     def get_embeddings(self):
-        return self.embeddings
+        return self.embeddings.get_value()
 
 class EmbeddingLayer(object):
-    def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01, initial_embeddings=None):
+    def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01, initial_embeddings=None, mode='FAST_RUN'):
         """ Initialize the parameters of the embedding layer
 
         :type rng: nympy.random.RandomState
@@ -84,6 +84,8 @@ class EmbeddingLayer(object):
         :param sequence_length: the number of words in each n-gram
         """
 
+        self.mode = mode
+
         self.vocab_size = vocab_size
         self.dimensions = dimensions
         self.sequence_length = sequence_length
@@ -98,28 +100,39 @@ class EmbeddingLayer(object):
         else:
             assert initial_embeddings.shape == embedding_shape
 
-        self.embedding = initial_embeddings
-        # self.embedding = theano.shared(value=np.eye(vocab_size, dimensions), name='embedding')
+        self.embeddings = theano.shared(value=initial_embeddings, name='embedding')
+
+        self._build_functions()
 
         self.params = []
 
-    def flatten_embeddings(self, embeddings):
-        """take a list of embedding vectors and put them into the appropriate format to feed to the next layer"""
-        return T.concatenate(embeddings)
+    def _build_functions(self):
+        symbol_index = T.scalar(dtype='int32')
+        embedding_delta = T.vector(dtype=theano.config.floatX)
+        inc_embedding = T.inc_subtensor(self.embeddings[symbol_index], embedding_delta)
+        self.update_embedding = theano.function([symbol_index, embedding_delta],
+                                                updates=[(self.embeddings, inc_embedding)],
+                                                mode=self.mode)
 
-    def embeddings_from_symbols(self, symbol_indices):
-        try:
-            return self.embedding[symbol_indices]
-        except IndexError as e:
-            print symbol_indices
-            raise e
+        self.embedding_from_symbol = theano.function([symbol_index],
+                                                     self.embeddings[symbol_index],
+                                                     mode=self.mode)
 
-    def update_embeddings(self, symbol_indices, updates):
-        self.embedding[symbol_indices] += np.array(updates)
+        indices = T.vector(name='indices', dtype='int32')
+        delta = T.matrix(dtype=theano.config.floatX)
+        update = (self.embeddings, T.inc_subtensor(self.embeddings[indices], delta))
+        self.update_embeddings = theano.function([indices, delta], updates=[update], mode=self.mode)
+
+
+    def embed_indices_symbolic(self, indices, num_indices=None):
+        if num_indices is None:
+            num_indices = self.sequence_length
+        return T.reshape(self.embeddings[indices], (self.dimensions * num_indices,))
 
     def most_similar_embeddings(self, index, metric='cosine', top_n=10, **kwargs):
-        embedding = self.embedding[index]
-        C = cdist(embedding[np.newaxis,:], self.embedding, metric, **kwargs)
+        embeddings = self.embeddings.get_value()
+        embedding = embeddings[index]
+        C = cdist(embedding[np.newaxis,:], embeddings, metric, **kwargs)
         sims = C[0]
         return [(i, sims[i]) for i in np.argsort(sims)[:top_n]]
 
@@ -132,7 +145,7 @@ class LinearScalarResponse(object):
                                               dtype=theano.config.floatX), name='W')
 
         # init the basis as a scalar, 0
-        self.b = theano.shared(value=0., name='b')
+        self.b = theano.shared(value=np.cast[theano.config.floatX](0.0), name='b')
 
         self.params = [self.W, self.b]
 
@@ -192,7 +205,7 @@ class HiddenLayer(object):
         if n_out > 1:
             b_values = np.zeros((n_out,), dtype=theano.config.floatX)
         else:
-            b_values= 0.0
+            b_values = np.cast[theano.config.floatX](0.0)
         self.b = theano.shared(value=b_values, name='b')
 
         # parameters of the model
@@ -202,17 +215,19 @@ class HiddenLayer(object):
         return self.activation(T.dot(input, self.W) + self.b)
 
 class NLM(EmbeddingTrainer):
-    def __init__(self, rng, vocabulary,  dimensions,  sequence_length, n_hidden, L1_reg, L2_reg, other_params=None, initial_embeddings=None):
+    def __init__(self, rng, vocabulary,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01):
         super(NLM, self).__init__(rng, vocabulary, dimensions)
         # initialize parameters
         if other_params is None:
             other_params = {}
         self.sequence_length = sequence_length
         self.n_hidden = n_hidden
-        self.L1_reg = L1_reg
-        self.L2_reg = L2_reg
         self.other_params = other_params
         self.blocks_trained = 0
+
+        self.learning_rate = theano.shared(value=np.cast[theano.config.floatX](learning_rate), name='learning_rate')
+
+        self.mode = mode
 
         self._make_layers(initial_embeddings=initial_embeddings)
         self._make_functions()
@@ -261,93 +276,62 @@ class NLM(EmbeddingTrainer):
 
         self.layer_stack = [self.hidden_layer, self.output_layer]
 
-        self.L1 = abs(self.hidden_layer.W).sum() + abs(self.output_layer.W).sum()
-
-        self.L2_sqr = (self.hidden_layer.W ** 2).sum() + (self.output_layer.W ** 2).sum()
-
     def get_params(self):
         return self.hidden_layer.params + self.output_layer.params
 
-    def score_symbolic(self, sequence_embedding):
-        return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, sequence_embedding)
+    def score_embedding_symbolic(self, embedding):
+        return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, embedding)
 
-    def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding):
-        return T.clip(1 - self.score_symbolic(correct_sequence_embedding) + self.score_symbolic(error_sequence_embedding), 0, np.inf)
+    def score_indices_symbolic(self, sequence_indices):
+        return self.score_embedding_symbolic(self.embedding_layer.embed_indices_symbolic(sequence_indices))
 
-    def loss(self, correct_embeddings, error_embeddings):
-        correct_sequence_embedding = self.embedding_layer.flatten_embeddings(correct_embeddings)
-        error_sequence_embedding = self.embedding_layer.flatten_embeddings(error_embeddings)
+    def symbolic_indices(self, basename):
+        return T.vector(name = basename, dtype='int32')
+        # return [T.scalar(name='%s%i' % (basename, i), dtype='int32') for i in range(self.sequence_length)]
 
-        return self.compare_symbolic(correct_sequence_embedding, error_sequence_embedding)
-
-    # def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding, logistic_scaling_factor=1.0):
-    #     score_difference = self.score_symbolic(correct_sequence_embedding) - self.score_symbolic(error_sequence_embedding)
-    #     return T.log(1 + T.exp(logistic_scaling_factor * -1 * score_difference))
-
-    def make_theano_training(self, correct_embeddings, error_embeddings, cost_addition=None):
+    def make_theano_weight_training(self):
         """
         compile and return symbolic theano function for training (including update of embedding and weights),
-        given two lists of symbolic vars, each of which is a list of symbolic vectors representing
-        word embeddings. First list is the list of embeddings for the training ngram, second is
-        the list of embeddings for the corruption.
-        Cost addition can be some constants or a function of theano vars (possibly shared)"""
-
-        cost = self.loss(correct_embeddings, error_embeddings)
-
-        if cost_addition is not None:
-            cost += cost_addition
-
-        weighted_learning_rate = T.scalar(name='weighted_learning_rate')
-
-        # update the params of the model using the gradients
-        updates = [(param, param - weighted_learning_rate * T.grad(cost, param))
-                   for param in self.params]
-
-        dcorrect_embeddings = T.grad(cost, correct_embeddings)
-        derror_embeddings = T.grad(cost, error_embeddings)
-
-        inputs = correct_embeddings + error_embeddings + [weighted_learning_rate]
-        outputs = dcorrect_embeddings + derror_embeddings + [cost]
-
-        return theano.function(inputs=inputs, outputs=outputs, updates=updates)
-
-    def make_theano_scoring(self, embeddings):
+        given two lists of symbolic vars, each of which is a list of symbolic indices representing
+        . First list is the list of indices for the training ngram, second is
+        the list of indices for the corruption.
         """
-        compile and return symbolic theano function for scoring an ngram, given a list of symbolic vars. Each
-        var in the list is a symbolic vector, representing a word embedding
-        """
-        return theano.function(inputs=embeddings, outputs=self.score_symbolic(self.embedding_layer.flatten_embeddings(embeddings)))
+        correct_indices = self.symbolic_indices('correct_index')
+        error_indices = self.symbolic_indices('error_index')
+
+        correct_sequence_embedding = self.embedding_layer.embed_indices_symbolic(correct_indices)
+        error_sequence_embedding = self.embedding_layer.embed_indices_symbolic(error_indices)
+
+        cost = T.clip(1 - self.score_embedding_symbolic(correct_sequence_embedding) + self.score_embedding_symbolic(error_sequence_embedding), 0, np.inf)
+
+        param_updates = [(param, param - self.learning_rate * T.grad(cost, param))
+                          for param in self.params]
+
+        dcorrect = T.reshape(T.grad(cost, correct_sequence_embedding), (self.sequence_length, self.dimensions))
+        derror = T.reshape(T.grad(cost, error_sequence_embedding), (self.sequence_length, self.dimensions))
+
+        correct_update = -self.learning_rate * dcorrect
+        error_update = -self.learning_rate * derror
+
+        inputs = [correct_indices, error_indices]
+        outputs = [correct_update, error_update, cost]
+
+        return theano.function(inputs=inputs, outputs=outputs, updates=param_updates, mode=self.mode)
+
+    def make_theano_scoring(self):
+        indices = self.symbolic_indices('index')
+        return theano.function(inputs=[indices], outputs=self.score_indices_symbolic(indices), mode=self.mode)
 
     def _make_functions(self):
         # create symbolic variables for correct and error input
-        correct_embeddings = [T.vector(name='correct_embedding%i' % i) for i in range(self.sequence_length)]
-        error_embeddings = [T.vector(name='error_embedding%i' % i) for i in range(self.sequence_length)]
-        embeddings = [T.vector(name='embedding%i' % i) for i in range(self.sequence_length)]
+        self.train_weights = self.make_theano_weight_training()
+        self.score = self.make_theano_scoring()
 
-        self.training_function = self.make_theano_training(correct_embeddings, error_embeddings, self.L1_reg * self.L1 + self.L2_reg * self.L2_sqr)
-        self.score_ngram = self.make_theano_scoring(embeddings)
-
-    def train(self, correct_sequence, error_sequence, weighted_learning_rate=0.01):
-        correct_embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in correct_sequence]
-        error_embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in error_sequence]
-
-        outputs = self.training_function(*(correct_embeddings + error_embeddings + [weighted_learning_rate]))
-
-        correct_grads, error_grads = list(grouper(self.sequence_length, outputs))[:2]
-
-        cost = outputs[-1]
-
-        correct_updates = -weighted_learning_rate * np.array(correct_grads)
-        error_updates = -weighted_learning_rate * np.array(error_grads)
-
-        self.embedding_layer.update_embeddings(correct_sequence, correct_updates)
-        self.embedding_layer.update_embeddings(error_sequence, error_updates)
-
-        return cost, correct_updates, error_updates
-
-    def score(self, sequence):
-        embeddings = [self.embedding_layer.embeddings_from_symbols(i) for i in sequence]
-        return self.score_ngram(*embeddings)
+    def train(self, correct_indices, error_indices):
+        correct_update, error_update, cost = self.train_weights(correct_indices, error_indices)
+        self.embedding_layer.update_embeddings(correct_indices, correct_update)
+        self.embedding_layer.update_embeddings(error_indices, error_update)
+        return cost
 
     def get_embeddings(self):
-        return self.embedding_layer.embedding
+        return self.embedding_layer.get_embeddings()

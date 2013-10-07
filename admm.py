@@ -120,7 +120,7 @@ class ADMMModel(EZPickle):
         index1 = T.scalar(dtype='int32', name='index1')
         index2 = T.scalar(dtype='int32', name='index2')
 
-        w1, w2, v1, v2, y = self.embeddings_and_y_symbolic(index1, index2)
+        w1, w2, v1, v2, y = self.embeddings_and_y_symbolic(T.stack(index1), T.stack(index2))
 
         w = T.concatenate([w1, w2])
         v = T.concatenate([v1, v2])

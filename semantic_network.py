@@ -5,6 +5,8 @@ import numpy as np
 import gzip, cPickle
 import semantic_module
 import sys
+import random
+import time
 
 from model import EmbeddingLayer, HiddenLayer, EmbeddingTrainer, EZPickle
 
@@ -223,6 +225,7 @@ if __name__ == "__main__":
         print 'bad type %s' % args.type
     epoch = 0
     SAVE_EVERY = 10
+    last_time = time.clock()
     while True:
         epoch += 1
         this_count = 0
@@ -245,7 +248,7 @@ if __name__ == "__main__":
                     cost = network.train(i, j, sim)
                     costs.append(cost)
             elif args.sampling == 'random':
-                for j in rng.permutation(N)[:k_nearest]:
+                for j in random.sample(xrange(N), k_nearest):
                     sim = word_similarity.word_pairwise_sims[i, j]
                     if sim == -np.inf:
                         continue
@@ -254,9 +257,14 @@ if __name__ == "__main__":
             else:
                 raise ValueError('bad argument %s for --sampling' % args.sampling)
 
-            sys.stdout.write('\r epoch %d: %d / %d\r' % (epoch, this_count, N))
-            sys.stdout.flush()
-        print 'epoch %d complete\ttraining cost %f' % (epoch, np.mean(costs))
+            if this_count % 100 == 0:
+                sys.stdout.write('\r epoch %d: %d / %d\r' % (epoch, this_count, N))
+                sys.stdout.flush()
+        current_time = time.clock()
+        elapsed = current_time - last_time
+        print 'epoch %d complete\ttraining cost %f\t%f' % (epoch, np.mean(costs), elapsed)
+        last_time = current_time
+
         if epoch % SAVE_EVERY == 0 and args.model_basename:
             with gzip.open('%s-%d.pkl.gz'% (args.model_basename, epoch), 'wb') as f:
                 cPickle.dump(network, f)

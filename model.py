@@ -1,7 +1,6 @@
 import theano
 import theano.tensor as T
 import numpy as np
-from utils import grouper
 from collections import defaultdict
 from scipy.spatial.distance import cdist
 
@@ -11,6 +10,24 @@ def _default_word():
     return '*UNKNOWN*'
 
 default_word = _default_word
+
+class EZPickle(object):
+    def init_params(self, **kwargs):
+        for name, val in kwargs.items():
+            if name in self.SHARED:
+                val = theano.shared(val, name=name)
+            setattr(self, name, val)
+
+    def __setstate__(self, state):
+        self.init_params(**state)
+
+    def __getstate__(self):
+        state = {}
+        for name in self.SHARED:
+            state[name] = getattr(self, name).get_value()
+        for name in self.OTHERS:
+            state[name] = getattr(self, name)
+        return state
 
 class EmbeddingTrainer(object):
     """contains a vocabulary with some associated embeddings, of given dimensions. Designed to be implemented by objects with train and update methods"""
@@ -65,7 +82,11 @@ class EmbeddingContainer(EmbeddingTrainer):
     def get_embeddings(self):
         return self.embeddings.get_value()
 
-class EmbeddingLayer(object):
+class EmbeddingLayer(EZPickle):
+    SHARED = ['embeddings']
+
+    OTHERS = ['mode', 'vocab_size', 'dimensions', 'sequence_length']
+
     def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01, initial_embeddings=None, mode='FAST_RUN'):
         """ Initialize the parameters of the embedding layer
 
@@ -84,13 +105,7 @@ class EmbeddingLayer(object):
         :param sequence_length: the number of words in each n-gram
         """
 
-        self.mode = mode
-
-        self.vocab_size = vocab_size
-        self.dimensions = dimensions
-        self.sequence_length = sequence_length
-
-        embedding_shape = (self.vocab_size, self.dimensions)
+        embedding_shape = (vocab_size, dimensions)
         if initial_embeddings is None:
             initial_embeddings = np.asarray(rng.uniform(
                     low=-initial_embedding_range / 2.,
@@ -100,8 +115,14 @@ class EmbeddingLayer(object):
         else:
             assert initial_embeddings.shape == embedding_shape
 
-        self.embeddings = theano.shared(value=initial_embeddings, name='embedding')
+        self.init_params(vocab_size=vocab_size,
+                         dimensions=dimensions,
+                         sequence_length=sequence_length,
+                         mode=mode,
+                         embeddings=initial_embeddings)
 
+    def init_params(self, **kwargs):
+        super(EmbeddingLayer, self).init_params(**kwargs)
         self._build_functions()
 
         self.params = []
@@ -136,25 +157,34 @@ class EmbeddingLayer(object):
         sims = C[0]
         return [(i, sims[i]) for i in np.argsort(sims)[:top_n]]
 
-class LinearScalarResponse(object):
+class LinearScalarResponse(EZPickle):
+    SHARED = ['W', 'b']
+
+    OTHERS = ['n_in']
+
     def __init__(self, n_in):
-        self.n_in = n_in
 
         # init the weights W as a vector of zeros
-        self.W = theano.shared(value=np.zeros((n_in,),
-                                              dtype=theano.config.floatX), name='W')
+        W_values = np.zeros((n_in,), dtype=theano.config.floatX)
 
         # init the basis as a scalar, 0
-        self.b = theano.shared(value=np.cast[theano.config.floatX](0.0), name='b')
+        b_values = np.cast[theano.config.floatX](0.0)
+
+        self.init_params(W=W_values, b=b_values, n_in=n_in)
+
+    def init_params(self, **kwargs):
+        super(LinearScalarResponse, self).init_params(**kwargs)
 
         self.params = [self.W, self.b]
-
-        self.hyper_params = [self.n_in]
 
     def apply(self, input):
         return T.dot(input, self.W) + self.b
 
-class HiddenLayer(object):
+class HiddenLayer(EZPickle):
+    SHARED = ['W', 'b']
+
+    OTHERS = ['activation']
+
     def __init__(self, rng, n_in, n_out, activation=T.nnet.sigmoid):
         """
         Typical hidden layer of a MLP: fully connected units with sigmoidal
@@ -178,7 +208,6 @@ class HiddenLayer(object):
         :type activation: theano.Op or function
         :param activation: Non Linearity to be applied in the hidden layer
         """
-        self.activation = activation
 
         # `W` is initialized with `W_values` which is uniformely sampled
         # from sqrt(-6./(n_in+n_hidden)) and sqrt(6./(n_in+n_hidden))
@@ -200,37 +229,76 @@ class HiddenLayer(object):
         if activation == T.nnet.sigmoid:
             W_values *= 4
 
-        self.W = theano.shared(value=W_values, name='W')
-
         if n_out > 1:
             b_values = np.zeros((n_out,), dtype=theano.config.floatX)
         else:
             b_values = np.cast[theano.config.floatX](0.0)
-        self.b = theano.shared(value=b_values, name='b')
 
-        # parameters of the model
+        self.init_params(W=W_values, b=b_values, activation=activation)
+
+    def init_params(self, **kwargs):
+        super(HiddenLayer, self).init_params(**kwargs)
+
+        # params should only be those which need to be updated in gradient
+        # descent
         self.params = [self.W, self.b]
 
     def apply(self, input):
         return self.activation(T.dot(input, self.W) + self.b)
 
-class NLM(EmbeddingTrainer):
+class NLM(EmbeddingTrainer, EZPickle):
+    SHARED = ['learning_rate']
+
+    OTHERS = ['n_hidden',
+              'other_params',
+              'blocks_trained',
+              'mode',
+              'embedding_layer',
+              'hidden_layer',
+              'output_layer',
+              'dimensions',
+              'sequence_length',
+              'n_hidden',
+              'vocab_size']
+
     def __init__(self, rng, vocabulary,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01):
         super(NLM, self).__init__(rng, vocabulary, dimensions)
         # initialize parameters
         if other_params is None:
             other_params = {}
-        self.sequence_length = sequence_length
-        self.n_hidden = n_hidden
-        self.other_params = other_params
-        self.blocks_trained = 0
+        blocks_trained = 0
 
-        self.learning_rate = theano.shared(value=np.cast[theano.config.floatX](learning_rate), name='learning_rate')
+        vocab_size = len(vocabulary)
 
-        self.mode = mode
+        learning_rate = np.cast[theano.config.floatX](learning_rate)
 
-        self._make_layers(initial_embeddings=initial_embeddings)
-        self._make_functions()
+        embedding_layer = EmbeddingLayer(rng, vocab_size=vocab_size,
+                                         dimensions=dimensions,
+                                         sequence_length=sequence_length)
+
+        hidden_layer = HiddenLayer(rng=rng,
+                                   n_in=dimensions * sequence_length,
+                                   n_out=n_hidden,
+                                   activation=T.nnet.sigmoid)
+
+        output_layer = LinearScalarResponse(n_in=n_hidden)
+
+        self.init_params(n_hidden=n_hidden,
+                         other_params=other_params,
+                         blocks_trained=blocks_trained,
+                         mode=mode,
+                         embedding_layer=embedding_layer,
+                         hidden_layer=hidden_layer,
+                         output_layer=output_layer,
+                         learning_rate=learning_rate,
+                         dimensions=dimensions,
+                         sequence_length=sequence_length,
+                         vocab_size=vocab_size)
+
+
+    def init_params(self, **kwargs):
+        super(NLM, self).init_params(**kwargs)
+        self.make_functions()
 
     # this is ugly, use it because we didn't always save the vocab
     def _get_vocabulary(self):
@@ -260,22 +328,6 @@ class NLM(EmbeddingTrainer):
             self._symbol_to_word[0] = '*UNKNOWN*'
             return self._symbol_to_word
 
-    def _make_layers(self, initial_embeddings=None):
-        self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,
-                                              dimensions=self.dimensions,
-                                              sequence_length=self.sequence_length)
-
-        self.hidden_layer = HiddenLayer(rng=self.rng,
-                                        n_in=self.dimensions * self.sequence_length,
-                                        n_out=self.n_hidden,
-                                        activation=T.nnet.sigmoid)
-
-        self.output_layer = LinearScalarResponse(n_in=self.n_hidden)
-
-        self.params = self.get_params()
-
-        self.layer_stack = [self.hidden_layer, self.output_layer]
-
     def get_params(self):
         return self.hidden_layer.params + self.output_layer.params
 
@@ -289,7 +341,7 @@ class NLM(EmbeddingTrainer):
         return T.vector(name = basename, dtype='int32')
         # return [T.scalar(name='%s%i' % (basename, i), dtype='int32') for i in range(self.sequence_length)]
 
-    def make_theano_weight_training(self):
+    def make_theano_training(self):
         """
         compile and return symbolic theano function for training (including update of embedding and weights),
         given two lists of symbolic vars, each of which is a list of symbolic indices representing
@@ -310,28 +362,28 @@ class NLM(EmbeddingTrainer):
         dcorrect = T.reshape(T.grad(cost, correct_sequence_embedding), (self.sequence_length, self.dimensions))
         derror = T.reshape(T.grad(cost, error_sequence_embedding), (self.sequence_length, self.dimensions))
 
-        correct_update = -self.learning_rate * dcorrect
-        error_update = -self.learning_rate * derror
+        dembeddings = T.concatenate([dcorrect, derror])
+        indices = T.concatenate([correct_indices, error_indices])
+
+        embedding_updates = [(self.embedding_layer.embeddings, T.inc_subtensor(self.embedding_layer.embeddings[indices], -self.learning_rate * dembeddings))]
 
         inputs = [correct_indices, error_indices]
-        outputs = [correct_update, error_update, cost]
+        outputs = cost
 
-        return theano.function(inputs=inputs, outputs=outputs, updates=param_updates, mode=self.mode)
+        return theano.function(inputs=inputs, outputs=outputs, updates=param_updates + embedding_updates, mode=self.mode)
 
     def make_theano_scoring(self):
         indices = self.symbolic_indices('index')
         return theano.function(inputs=[indices], outputs=self.score_indices_symbolic(indices), mode=self.mode)
 
-    def _make_functions(self):
+    def make_functions(self):
         # create symbolic variables for correct and error input
-        self.train_weights = self.make_theano_weight_training()
-        self.score = self.make_theano_scoring()
+        self.layer_stack = [self.hidden_layer, self.output_layer]
 
-    def train(self, correct_indices, error_indices):
-        correct_update, error_update, cost = self.train_weights(correct_indices, error_indices)
-        self.embedding_layer.update_embeddings(correct_indices, correct_update)
-        self.embedding_layer.update_embeddings(error_indices, error_update)
-        return cost
+        self.params = self.get_params()
+
+        self.train = self.make_theano_training()
+        self.score = self.make_theano_scoring()
 
     def get_embeddings(self):
         return self.embedding_layer.get_embeddings()

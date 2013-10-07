@@ -15,28 +15,42 @@ import os
 from utils import models_in_folder
 import random
 
-class ADMMModel(object):
-    def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, y_init=0.0, semantic_gd_rate=0.1, syntactic_gd_rate=0.1, normalize_y=False, syntactic_weight=0.5, mode='FAST_RUN'):
-        self.syntactic_model = syntactic_model
-        self.semantic_model = semantic_model
-        self.vocab_size = vocab_size
-        self.rho = rho
-        self.other_params = other_params
-        self.y_init = y_init
-        self.normalize_y = normalize_y
-        self.syntactic_weight = syntactic_weight
+from model import EZPickle
 
-        self.k = 0
+class ADMMModel(EZPickle):
+    SHARED = ['y', 'syntactic_weight']
+    OTHERS = ['syntactic_model',
+              'semantic_model',
+              'vocab_size',
+              'rho',
+              'other_params',
+              'y_init',
+              'normalize_y',
+              'mode',
+              'k']
+    def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, y_init=0.0, normalize_y=False, syntactic_weight=0.5, mode='FAST_RUN'):
 
         # the lagrangian
-        self.y = (np.ones((vocab_size,syntactic_model.dimensions)) * y_init).astype(theano.config.floatX)
+        y = (np.ones((vocab_size,syntactic_model.dimensions)) * y_init).astype(theano.config.floatX)
 
         # self.y = theano.shared(value=y_init, name='y')
-        self.semantic_gd_rate = theano.shared(value=np.cast[theano.config.floatX](semantic_gd_rate), name='semantic_gd_rate')
-        self.syntactic_gd_rate = theano.shared(value=np.cast[theano.config.floatX](syntactic_gd_rate), name='syntactic_gd_rate')
+        syntactic_weight = np.cast[theano.config.floatX](syntactic_weight)
 
-        self.mode = mode
+        self.init_params(syntactic_model=syntactic_model,
+                         semantic_model=semantic_model,
+                         vocab_size=vocab_size,
+                         rho=rho,
+                         other_params=other_params,
+                         y_init=y_init,
+                         normalize_y=normalize_y,
+                         syntactic_weight=syntactic_weight,
+                         mode=mode,
+                         y=y,
+                         k=0)
 
+
+    def init_params(self, **kwargs):
+        super(ADMMModel, self).init_params(**kwargs)
         self._build_functions()
 
     def admm_penalty(self, w, v, y):
@@ -47,8 +61,8 @@ class ADMMModel(object):
         return norm * T.dot(y, (w - v)) + self.rho / 2.0 * T.dot((w - v).T, w - v)
 
     def _build_functions(self):
-        self.syntactic_update_function = self.make_theano_syntactic_update()
-        self.semantic_update_function = self.make_theano_semantic_update()
+        self.update_syntactic = self.make_theano_syntactic_update()
+        self.update_semantic = self.make_theano_semantic_update()
 
     @property
     def word_to_symbol(self):
@@ -60,131 +74,76 @@ class ADMMModel(object):
 
     @property
     def syntactic_embedding(self):
-        return self.syntactic_model.embedding_layer.embeddings.get_value()
+        return self.syntactic_model.get_embeddings()
 
     @property
     def semantic_embedding(self):
-        return self.semantic_model.embedding_layer.embeddings.get_value()
+        return self.semantic_model.get_embeddings()
+
+    def embeddings_and_y_symbolic(self, correct_indices, error_indices):
+        all_indices = T.concatenate(correct_indices, error_indices)
+
+        w_correct_embedding = self.syntactic_model.embed_indices_symbolic(correct_indices)
+        w_error_embedding = self.syntactic_model.embed_indices_symbolic(error_indices)
+
+        v_correct_embedding = self.semantic_model.embed_indices_symbolic(correct_indices)
+        v_error_embedding = self.semantic_model.embed_indices_symbolic(error_indices)
+
+        y = self.y[all_indices]
+
+        return w_correct_embedding, w_error_embedding, v_correct_embedding, v_error_embedding, y
 
     def make_theano_syntactic_update(self):
         # build the update functions for w, the embeddings of the syntactic
         # model
-        # these represent the embeddings from the semantic model for the good
-        # and bad ngrams
-        seq_length = self.syntactic_model.sequence_length
+        correct_indices = self.syntactic_model.symbolic_indices('correct_index')
+        error_indices = self.syntactic_model.symbolic_indices('error_index')
 
-        w_correct_embeddings = [T.vector(name='w_correct_embedding%i' % i) for i in range(seq_length)]
-        w_error_embeddings = [T.vector(name='w_error_embedding%i' % i) for i in range(seq_length)]
-        w_embeddings = w_correct_embeddings + w_error_embeddings
+        w_correct_embedding, w_error_embedding, v_correct_embedding, v_error_embedding, y = self.embeddings_and_y_symbolic(correct_indices, error_indices)
 
-        # these represent the corresponding embeddings from the semantic model
-        v_correct_embeddings = [T.vector(name='v_correct_embedding%i' % i) for i in range(seq_length)]
-        v_error_embeddings = [T.vector(name='v_error_embedding%i' % i) for i in range(seq_length)]
-        v_embeddings = v_correct_embeddings + v_error_embeddings
+        w = T.concatenate([w_correct_embedding, w_error_embedding])
+        v = T.concatenate([v_correct_embedding, v_error_embedding])
 
-        w = T.concatenate(w_embeddings)
-        v = T.concatenate(v_embeddings)
+        cost = self.syntactic_model.cost_from_embeddings_symbolic(w_correct_embedding, w_error_embedding)
 
-        y_weights= [T.vector(name='y_weight%i' % i) for i in range(2 * seq_length)]
-        y = T.concatenate(y_weights)
-
-        cost = self.syntactic_model.loss(w_correct_embeddings, w_error_embeddings)
         augmented_cost = self.syntactic_weight * cost + self.admm_penalty(w, v, y)
 
-        try:
-            syntactic_params = self.syntactic_model.params
-        except:
-            # since sometimes we're loading in an old model where params hadn't
-            # been set
-            syntactic_params = self.syntactic_model.get_params()
-        print [(param, param.dtype) for param in syntactic_params]
-        updates = [(param, param - self.syntactic_gd_rate * T.grad(augmented_cost, param))
-                   for param in syntactic_params]
+        updates = self.syntactic_model.updates_symbolic(augmented_cost, correct_indices, error_indices,
+                                                        w_correct_embedding, w_error_embedding)
 
-        dcorrect_embeddings = T.grad(augmented_cost, w_correct_embeddings)
-        derror_embeddings = T.grad(augmented_cost, w_error_embeddings)
-
-        return theano.function(inputs=w_embeddings + v_embeddings + y_weights,
-                               outputs=dcorrect_embeddings + derror_embeddings + [cost, augmented_cost],
+        return theano.function(inputs=[correct_indices, error_indices],
+                               outputs=[cost, augmented_cost],
                                updates=updates,
                                mode=self.mode)
 
-    def update_syntactic(self, correct_symbols, error_symbols):
-        syntactic_correct = [self.syntactic_embedding[i] for i in correct_symbols]
-        syntactic_error = [self.syntactic_embedding[i] for i in error_symbols]
-
-        semantic_correct = [self.semantic_embedding[i] for i in correct_symbols]
-        semantic_error = [self.semantic_embedding[i] for i in error_symbols]
-
-        y_correct = [self.y[i] for i in correct_symbols]
-        y_error = [self.y[i] for i in error_symbols]
-        y_weights = y_correct + y_error
-
-        outputs = self.syntactic_update_function(*(syntactic_correct + syntactic_error + semantic_correct + semantic_error + y_weights))
-
-        correct_grads = outputs[:self.syntactic_model.sequence_length]
-        error_grads = outputs[self.syntactic_model.sequence_length:-2]
-        cost, augmented_cost = outputs[-2:]
-
-        weight = self.syntactic_gd_rate.get_value()
-
-        correct_updates = - weight * np.array(correct_grads)
-        error_updates = - weight * np.array(error_grads)
-
-        self.syntactic_model.embedding_layer.update_embeddings(correct_symbols, correct_updates)
-        self.syntactic_model.embedding_layer.update_embeddings(error_symbols, error_updates)
-
-        return cost, augmented_cost, correct_updates, error_updates
-
-
     def make_theano_semantic_update(self):
-        w1, w2, v1, v2 = [T.vector(name='%s_embedding' % name) for name in ['w1', 'w2', 'v1', 'v2']]
-        y1, y2 = T.vector('y1_weight'), T.vector('y2_weight')
+        index1 = T.scalar(dtype='int32', name='index1')
+        index2 = T.scalar(dtype='int32', name='index2')
+
+        w1, w2, v1, v2, y = self.embeddings_and_y_symbolic(index1, index2)
 
         w = T.concatenate([w1, w2])
         v = T.concatenate([v1, v2])
-        y = T.concatenate([y1, y2])
 
         actual_sim = T.scalar(name='semantic_similarity')
 
-        cost = self.semantic_model.loss(v1, v2, actual_sim)
+        cost = self.semantic_model.cost_from_embeddings_symbolic(v1, v2, actual_sim)
         augmented_cost = (1 - self.syntactic_weight) * cost + self.admm_penalty(w, v, y)
 
-        updates = [(param, param - self.semantic_gd_rate * T.grad(augmented_cost, param))
-                   for param in self.semantic_model.params]
+        updates = self.semantic_model.updates_symbolic(augmented_cost, index1, index2, v1, v2)
 
-        dv1 = T.grad(augmented_cost, v1)
-        dv2 = T.grad(augmented_cost, v2)
-
-        return theano.function(inputs=[w1, w2, v1, v2, y1, y2, actual_sim],
-                               outputs=[dv1, dv2, cost, augmented_cost],
+        return theano.function(inputs=[index1, index2, actual_sim],
+                               outputs=[cost, augmented_cost],
                                updates=updates,
                                mode=self.mode)
 
-    def update_semantic(self, index1, index2, actual_similarity):
-        w1 = self.syntactic_embedding[index1]
-        w2 = self.syntactic_embedding[index2]
-
-        v1 = self.semantic_embedding[index1]
-        v2 = self.semantic_embedding[index2]
-
-        y1 = self.y[index1]
-        y2 = self.y[index2]
-
-        dv1, dv2, cost, augmented_cost = self.semantic_update_function(w1, w2, v1, v2, y1, y2, actual_similarity)
-
-        weight = self.semantic_gd_rate.get_value()
-
-        self.semantic_model.embedding_layer.update_embeddings(index1, - weight * dv1)
-        self.semantic_model.embedding_layer.update_embeddings(index2, - weight * dv2)
-
-        return cost, augmented_cost, dv1, dv2
-
     def update_y(self):
-        w = self.syntactic_embedding
-        v = self.semantic_embedding
+        return
+        w = self.syntactic_model.embeddings
+        v = self.syntactic_model.embeddings
         residual = w - v
         delta_y = self.rho * residual
+        updates = (self.y, self.y + self.rho * residual)
         self.y += delta_y
 
         res = np.ravel(residual)
@@ -218,6 +177,10 @@ class ADMMModel(object):
                 f.write('%s %s\n' % (self.symbol_to_word[index], vector_string_rep))
 
 class AnnealingADMMModel(ADMMModel):
+    SHARED = ADMMModel.SHARED
+
+    OTHERS = ADMMModel.OTHERS + ['semantic_gd_initial_rate', 'syntactic_gd_initial_rate', 'semantic_annealing_T', 'syntactic_annealing_T']
+
     def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, semantic_annealing_T, semantic_gd_initial_rate, syntactic_annealing_T, syntactic_gd_initial_rate, normalize_y=False, y_init=0.0, syntactic_weight=0.5, mode='FAST_RUN'):
         super(AnnealingADMMModel, self).__init__(syntactic_model,
                                                  semantic_model,
@@ -377,12 +340,10 @@ if __name__ == "__main__":
                     _syntactic_model = loaded_model
         else:
             _syntactic_model = NLM(rng=rng,
-                                vocabulary=vocabulary,
-                                dimensions=args['dimensions'],
-                                sequence_length=args['sequence_length'],
-                                n_hidden=args['n_hidden'],
-                                L1_reg=0,
-                                L2_reg=0,
+                                   vocabulary=vocabulary,
+                                   dimensions=args['dimensions'],
+                                   sequence_length=args['sequence_length'],
+                                   n_hidden=args['n_hidden'],
                                    mode=theano_mode)
 
         if args['existing_semantic_model']:
@@ -475,7 +436,7 @@ if __name__ == "__main__":
                             theano_mode.print_summary()
                     train_index = sample_cumulative_discrete_distribution(training_block[:,-1], rng=data_rng)
                     correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], rng=data_rng)
-                    cost, augmented_cost, correct_updates, error_updates = model.update_syntactic(correct_symbols, error_symbols)
+                    cost, augmented_cost, = model.update_syntactic(correct_symbols, error_symbols)
                     costs.append(cost)
                     augmented_costs.append(augmented_cost)
                 if blocks_to_run > 1:

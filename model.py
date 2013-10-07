@@ -129,21 +129,9 @@ class EmbeddingLayer(EZPickle):
 
     def _build_functions(self):
         symbol_index = T.scalar(dtype='int32')
-        embedding_delta = T.vector(dtype=theano.config.floatX)
-        inc_embedding = T.inc_subtensor(self.embeddings[symbol_index], embedding_delta)
-        self.update_embedding = theano.function([symbol_index, embedding_delta],
-                                                updates=[(self.embeddings, inc_embedding)],
-                                                mode=self.mode)
-
         self.embedding_from_symbol = theano.function([symbol_index],
                                                      self.embeddings[symbol_index],
                                                      mode=self.mode)
-
-        indices = T.vector(name='indices', dtype='int32')
-        delta = T.matrix(dtype=theano.config.floatX)
-        update = (self.embeddings, T.inc_subtensor(self.embeddings[indices], delta))
-        self.update_embeddings = theano.function([indices, delta], updates=[update], mode=self.mode)
-
 
     def embed_indices_symbolic(self, indices, num_indices=None):
         if num_indices is None:
@@ -341,21 +329,13 @@ class NLM(EmbeddingTrainer, EZPickle):
         return T.vector(name = basename, dtype='int32')
         # return [T.scalar(name='%s%i' % (basename, i), dtype='int32') for i in range(self.sequence_length)]
 
-    def make_theano_training(self):
-        """
-        compile and return symbolic theano function for training (including update of embedding and weights),
-        given two lists of symbolic vars, each of which is a list of symbolic indices representing
-        . First list is the list of indices for the training ngram, second is
-        the list of indices for the corruption.
-        """
-        correct_indices = self.symbolic_indices('correct_index')
-        error_indices = self.symbolic_indices('error_index')
+    def embed_indices_symbolic(self, indices):
+        return self.embedding_layer.embed_indices_symbolic(indices)
 
-        correct_sequence_embedding = self.embedding_layer.embed_indices_symbolic(correct_indices)
-        error_sequence_embedding = self.embedding_layer.embed_indices_symbolic(error_indices)
+    def cost_from_embeddings_symbolic(self, correct_sequence_embedding, error_sequence_embedding):
+        return T.clip(1 - self.score_embedding_symbolic(correct_sequence_embedding) + self.score_embedding_symbolic(error_sequence_embedding), 0, np.inf)
 
-        cost = T.clip(1 - self.score_embedding_symbolic(correct_sequence_embedding) + self.score_embedding_symbolic(error_sequence_embedding), 0, np.inf)
-
+    def updates_symbolic(self, cost, correct_indices, error_indices, correct_sequence_embedding, error_sequence_embedding):
         param_updates = [(param, param - self.learning_rate * T.grad(cost, param))
                           for param in self.params]
 
@@ -367,10 +347,28 @@ class NLM(EmbeddingTrainer, EZPickle):
 
         embedding_updates = [(self.embedding_layer.embeddings, T.inc_subtensor(self.embedding_layer.embeddings[indices], -self.learning_rate * dembeddings))]
 
+        return param_updates + embedding_updates
+
+    def make_theano_training(self):
+        """
+        compile and return symbolic theano function for training (including update of embedding and weights),
+        The compiled function will take two vectors of ints, each of length
+        sequence_length, which are the indices of the words in the good and bad
+        ngrams
+        """
+        correct_indices = self.symbolic_indices('correct_index')
+        error_indices = self.symbolic_indices('error_index')
+
+        correct_sequence_embedding = self.embed_indices_symbolic(correct_indices)
+        error_sequence_embedding = self.embed_indices_symbolic(error_indices)
+
+        cost = self.cost_from_embeddings_symbolic(correct_sequence_embedding, error_sequence_embedding)
+
         inputs = [correct_indices, error_indices]
         outputs = cost
+        updates = self.updates_symbolic(cost, correct_indices, error_indices, correct_sequence_embedding, error_sequence_embedding)
 
-        return theano.function(inputs=inputs, outputs=outputs, updates=param_updates + embedding_updates, mode=self.mode)
+        return theano.function(inputs=inputs, outputs=outputs, updates=updates, mode=self.mode)
 
     def make_theano_scoring(self):
         indices = self.symbolic_indices('index')

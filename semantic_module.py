@@ -3,7 +3,7 @@ import itertools
 from collections import defaultdict
 import os
 
-MEMMAP_DTYPE = 'float64'
+MEMMAP_DTYPE = 'float32'
 
 def fill_nan(arr):
     arr[np.isnan(arr)] = -np.inf

@@ -383,7 +383,6 @@ if __name__ == "__main__":
             initial_embeddings = _semantic_model.embedding_layer.embedding
         else:
             sem_loaded = False
-            initial_embeddings = None
 
         if not sem_loaded:
             print 'creating new sem layer'

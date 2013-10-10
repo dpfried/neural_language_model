@@ -362,14 +362,11 @@ if __name__ == "__main__":
                     _syntactic_model = loaded_model.syntactic_model
                 else:
                     _syntactic_model = loaded_model
+            syn_loaded = True
+            initial_embeddings = _syntactic_model.embedding_layer.embedding
         else:
-            _syntactic_model = NLM(rng=rng,
-                                vocabulary=vocabulary,
-                                dimensions=args['dimensions'],
-                                sequence_length=args['sequence_length'],
-                                n_hidden=args['n_hidden'],
-                                L1_reg=0,
-                                L2_reg=0)
+            syn_loaded = False
+            initial_embeddings = None
 
         if args['existing_semantic_model']:
             # check to see if the model to load is itself an ADMM. if it is,
@@ -382,11 +379,29 @@ if __name__ == "__main__":
                     _semantic_model = loaded_model.semantic_model
                 else:
                     _semantic_model = loaded_model
+            sem_loaded = True
+            initial_embeddings = _semantic_model.embedding_layer.embedding
         else:
-            _semantic_model = SemanticDistance(rng=rng,
-                                            vocabulary=vocabulary,
-                                            dimensions=args['dimensions'])
+            sem_loaded = False
+            initial_embeddings = None
 
+        if not sem_loaded:
+            print 'creating new sem layer'
+            _semantic_model = SemanticDistance(rng=rng,
+                                               vocabulary=vocabulary,
+                                               dimensions=args['dimensions'],
+                                               initial_embeddings=initial_embeddings)
+
+        if not syn_loaded:
+            print 'creating new syn layer'
+            _syntactic_model = NLM(rng=rng,
+                                   vocabulary=vocabulary,
+                                   dimensions=args['dimensions'],
+                                   sequence_length=args['sequence_length'],
+                                   n_hidden=args['n_hidden'],
+                                   L1_reg=0,
+                                   L2_reg=0,
+                                   initial_embeddings=initial_embeddings)
         if args['annealing']:
             print 'annealing'
             model = AnnealingADMMModel(syntactic_model=_syntactic_model,
@@ -412,6 +427,18 @@ if __name__ == "__main__":
                             syntactic_gd_rate=args['syntactic_gd_rate'],
                             normalize_y=args['normalize_y'],
                             syntactic_weight=args['syntactic_weight'])
+    def save_model():
+        fname = os.path.join(args['base_dir'], 'model-%d.pkl.gz' % model.k)
+        sys.stdout.write('dumping model to %s' % fname)
+        sys.stdout.flush()
+        with gzip.open(fname, 'wb') as f:
+            cPickle.dump(model, f)
+        sys.stdout.write('\r')
+        sys.stdout.flush()
+
+    # save the initial state
+    if not model_loaded:
+        save_model()
 
     print 'loading semantic similarities'
     word_similarity = semantic_module.WordSimilarity(vocabulary, args['word_similarity_file'], memmap_filename=args['word_similarity_memmap'])
@@ -548,13 +575,7 @@ if __name__ == "__main__":
 
         # dump it
         if not args['dont_save_model'] and model.k % args['save_model_frequency'] == 0:
-            fname = os.path.join(args['base_dir'], 'model-%d.pkl.gz' % model.k)
-            sys.stdout.write('dumping model to %s' % fname)
-            sys.stdout.flush()
-            with gzip.open(fname, 'wb') as f:
-                cPickle.dump(model, f)
-            sys.stdout.write('\r')
-            sys.stdout.flush()
+            save_model()
 
         # dump stats
         if not args['dont_save_stats']:

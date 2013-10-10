@@ -27,6 +27,7 @@ def make_series(model_root_folder,
     model_nums = sorted(models.keys())
 
     latest_num = model_nums[-1] if model_nums else -1
+    latest_num = -1
 
     to_plot = [n for n in model_nums if n % plot_interval == 0 and n != latest_num]
     if 1 in model_nums:
@@ -103,8 +104,11 @@ if __name__ == "__main__":
                                                    **vars(args)))
                      for model_directory in args.model_directories)
 
+    for name, s in all_stats.items():
+        print name
+        print s
+
     stat_example = [s for s in all_stats.values() if len(s) != 0][0]
-    print stat_example
     import matplotlib.pyplot as plt
     for stat_name in stat_example:
         plt.figure()

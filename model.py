@@ -96,6 +96,7 @@ class EmbeddingLayer(object):
                     size=embedding_shape),
                 dtype=theano.config.floatX)
         else:
+            print 'using initial embeddings'
             assert initial_embeddings.shape == embedding_shape
 
         self.embedding = initial_embeddings
@@ -248,7 +249,8 @@ class NLM(EmbeddingTrainer):
     def _make_layers(self, initial_embeddings=None):
         self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,
                                               dimensions=self.dimensions,
-                                              sequence_length=self.sequence_length)
+                                              sequence_length=self.sequence_length,
+                                              initial_embeddings=initial_embeddings)
 
         self.hidden_layer = HiddenLayer(rng=self.rng,
                                         n_in=self.dimensions * self.sequence_length,

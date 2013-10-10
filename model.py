@@ -17,17 +17,23 @@ class EZPickle(object):
     SHARED = [] # should be overridden by subclasses
     OTHERS = [] # should be overridden by subclasses
     def init_params(self, **kwargs):
+        # print kwargs
         for param in self.SHARED:
             if type(param) is tuple:
                 name, default = param
             else:
                 name, default = param, None
+            # print name
+            # print default
+            # print kwargs.get(name, default)
+            # print 'setting %s to shared of %s' % (name, kwargs.get(name, default))
             setattr(self, name, theano.shared(kwargs.get(name, default), name=name))
         for param in self.OTHERS:
             if type(param) is tuple:
                 name, default = param
             else:
                 name, default = param, None
+            # print 'setting %s to %s' % (name, kwargs.get(name, default))
             setattr(self, name, kwargs.get(name, default))
 
     def __setstate__(self, state):
@@ -38,7 +44,7 @@ class EZPickle(object):
         for val in self.SHARED:
             name = val[0] if type(val) is tuple else val
             state[name] = getattr(self, name).get_value()
-        for name in self.OTHERS:
+        for val in self.OTHERS:
             name = val[0] if type(val) is tuple else val
             state[name] = getattr(self, name)
         return state
@@ -136,7 +142,7 @@ class EmbeddingLayer(EZPickle):
                          dimensions=dimensions,
                          sequence_length=sequence_length,
                          mode=mode,
-                         embeddings=initial_embeddings)
+                         embedding=initial_embeddings)
 
     def init_params(self, **kwargs):
         super(EmbeddingLayer, self).init_params(**kwargs)
@@ -153,7 +159,7 @@ class EmbeddingLayer(EZPickle):
     def embed_indices_symbolic(self, indices, num_indices=None):
         if num_indices is None:
             num_indices = self.sequence_length
-        return T.reshape(self.embedding[indices], (self.dimensions * num_indices,))
+        return T.flatten(self.embedding[indices])
 
     def most_similar_embeddings(self, index, metric='cosine', top_n=10, **kwargs):
         embeddings = self.embedding.get_value()

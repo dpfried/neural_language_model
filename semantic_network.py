@@ -11,10 +11,10 @@ import time
 from model import EmbeddingLayer, HiddenLayer, EmbeddingTrainer, EZPickle
 
 class SemanticDistance(EZPickle):
-    SHARED = ['learning_rate']
+    SHARED = [('learning_rate', 0.01)]
 
     OTHERS = ['blocks_trained',
-              'mode',
+              ('mode', 'FAST_RUN'),
               'embedding_layer',
               'dimensions',
               'vocab_size']
@@ -61,8 +61,8 @@ class SemanticDistance(EZPickle):
 
         indices = T.stack(index1, index2)
 
-        return [(self.embedding_layer.embeddings,
-                 T.inc_subtensor(self.embedding_layer.embeddings[indices], -self.learning_rate * dembeddings))]
+        return [(self.embedding_layer.embedding,
+                 T.inc_subtensor(self.embedding_layer.embedding[indices], -self.learning_rate * dembeddings))]
 
     def make_functions(self):
         # create symbolic variables for correct and error input

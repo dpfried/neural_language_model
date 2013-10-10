@@ -26,7 +26,7 @@ class ADMMModel(EZPickle):
               'other_params',
               'y_init',
               'normalize_y',
-              'mode',
+              ('mode', 'FAST_RUN'),
               'k']
     def __init__(self, syntactic_model, semantic_model, vocab_size, rho, other_params, y_init=0.0, normalize_y=False, syntactic_weight=0.5, mode='FAST_RUN'):
 
@@ -139,8 +139,8 @@ class ADMMModel(EZPickle):
 
     def update_y(self):
         return
-        w = self.syntactic_model.embeddings
-        v = self.syntactic_model.embeddings
+        w = self.syntactic_model.embedding
+        v = self.syntactic_model.embedding
         residual = w - v
         delta_y = self.rho * residual
         updates = (self.y, self.y + self.rho * residual)

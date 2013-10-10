@@ -4,6 +4,8 @@ import numpy as np
 from collections import defaultdict
 from scipy.spatial.distance import cdist
 
+theano.config.on_unused_input = 'warn' # for unpickling old models
+
 def _default_word():
     '''have to do this as a module level function b/c otherwise pickle won't
     let us save the defaultdict inside EmbeddingTrainer'''
@@ -12,20 +14,32 @@ def _default_word():
 default_word = _default_word
 
 class EZPickle(object):
+    SHARED = [] # should be overridden by subclasses
+    OTHERS = [] # should be overridden by subclasses
     def init_params(self, **kwargs):
-        for name, val in kwargs.items():
-            if name in self.SHARED:
-                val = theano.shared(val, name=name)
-            setattr(self, name, val)
+        for param in self.SHARED:
+            if type(param) is tuple:
+                name, default = param
+            else:
+                name, default = param, None
+            setattr(self, name, theano.shared(kwargs.get(name, default), name=name))
+        for param in self.OTHERS:
+            if type(param) is tuple:
+                name, default = param
+            else:
+                name, default = param, None
+            setattr(self, name, kwargs.get(name, default))
 
     def __setstate__(self, state):
         self.init_params(**state)
 
     def __getstate__(self):
         state = {}
-        for name in self.SHARED:
+        for val in self.SHARED:
+            name = val[0] if type(val) is tuple else val
             state[name] = getattr(self, name).get_value()
         for name in self.OTHERS:
+            name = val[0] if type(val) is tuple else val
             state[name] = getattr(self, name)
         return state
 
@@ -52,7 +66,7 @@ class EmbeddingTrainer(object):
         format_str = '%%0.%if' % precision
         float_to_str = lambda f: format_str % f
         with open(filename, 'w') as f:
-            for index, embedding in enumerate(self.embeddings()):
+            for index, embedding in enumerate(self.get_embeddings()):
                 # skip RARE
                 if index == 0:
                     continue
@@ -77,15 +91,18 @@ class EmbeddingContainer(EmbeddingTrainer):
     def __init__(self, vocabulary, embeddings):
         vocab_size, dimensions = embeddings.shape
         super(EmbeddingContainer, self).__init__(None, vocabulary, dimensions)
-        self.embeddings = embeddings
+        self.embedding = embedding
 
     def get_embeddings(self):
         return self.embeddings.get_value()
 
 class EmbeddingLayer(EZPickle):
-    SHARED = ['embeddings']
+    SHARED = ['embedding']
 
-    OTHERS = ['mode', 'vocab_size', 'dimensions', 'sequence_length']
+    OTHERS = [('mode', 'FAST_RUN'),
+              'vocab_size',
+              'dimensions',
+              'sequence_length']
 
     def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01, initial_embeddings=None, mode='FAST_RUN'):
         """ Initialize the parameters of the embedding layer
@@ -130,18 +147,18 @@ class EmbeddingLayer(EZPickle):
     def _build_functions(self):
         symbol_index = T.scalar(dtype='int32')
         self.embedding_from_symbol = theano.function([symbol_index],
-                                                     self.embeddings[symbol_index],
+                                                     self.embedding[symbol_index],
                                                      mode=self.mode)
 
     def embed_indices_symbolic(self, indices, num_indices=None):
         if num_indices is None:
             num_indices = self.sequence_length
-        return T.reshape(self.embeddings[indices], (self.dimensions * num_indices,))
+        return T.reshape(self.embedding[indices], (self.dimensions * num_indices,))
 
     def most_similar_embeddings(self, index, metric='cosine', top_n=10, **kwargs):
-        embeddings = self.embeddings.get_value()
-        embedding = embeddings[index]
-        C = cdist(embedding[np.newaxis,:], embeddings, metric, **kwargs)
+        embeddings = self.embedding.get_value()
+        this_embedding = embeddings[index]
+        C = cdist(this_embedding[np.newaxis,:], embeddings, metric, **kwargs)
         sims = C[0]
         return [(i, sims[i]) for i in np.argsort(sims)[:top_n]]
 
@@ -235,12 +252,12 @@ class HiddenLayer(EZPickle):
         return self.activation(T.dot(input, self.W) + self.b)
 
 class NLM(EmbeddingTrainer, EZPickle):
-    SHARED = ['learning_rate']
+    SHARED = [('learning_rate', 0.01)]
 
     OTHERS = ['n_hidden',
               'other_params',
               'blocks_trained',
-              'mode',
+              ('mode', 'FAST_RUN'),
               'embedding_layer',
               'hidden_layer',
               'output_layer',
@@ -345,7 +362,7 @@ class NLM(EmbeddingTrainer, EZPickle):
         dembeddings = T.concatenate([dcorrect, derror])
         indices = T.concatenate([correct_indices, error_indices])
 
-        embedding_updates = [(self.embedding_layer.embeddings, T.inc_subtensor(self.embedding_layer.embeddings[indices], -self.learning_rate * dembeddings))]
+        embedding_updates = [(self.embedding_layer.embedding, T.inc_subtensor(self.embedding_layer.embedding[indices], -self.learning_rate * dembeddings))]
 
         return param_updates + embedding_updates
 

@@ -1,3 +1,4 @@
+import time
 import json
 import pandas
 import theano
@@ -419,6 +420,7 @@ if __name__ == "__main__":
     sampling = args['sampling']
 
     while True:
+        last_time = time.clock()
         model.increase_k()
         stats_for_k = {}
         if args['annealing']:
@@ -466,7 +468,9 @@ if __name__ == "__main__":
 
             print 'validation:'
             print 'syntactic mean score \t%f' % syn_validation_mean
-            print 'syntactic mean weighted score \t%f' % syn_validation_mean
+            print 'syntactic mean weighted score \t%f' % syn_validation_weighted_mean
+
+        print 'time since block init: %f' % (time.clock() - last_time)
 
         # semantic update step
         if args['annealing']:
@@ -527,6 +531,8 @@ if __name__ == "__main__":
             stats_for_k['res_norm'] = res_norm
             stats_for_k['y_norm'] = y_norm
             print 'k: %d\tnorm(w - v) %f \t norm(y) %f' % (model.k, res_norm, y_norm)
+
+        print 'time: %f' % (time.clock() - last_time)
 
         # append the stats for this update to all stats
         all_stats = pandas.concat([all_stats, pandas.DataFrame(stats_for_k, index=[model.k])])

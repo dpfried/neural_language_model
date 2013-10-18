@@ -115,11 +115,12 @@ class SemanticNet(EmbeddingTrainer):
 
         self.L2_sqr = (self.hidden_layer.W ** 2).sum() + (self.output_layer.W ** 2).sum()
 
-    def similarity_symbolic(self, smashed_words_embedding):
+    def similarity_symbolic(self, w1_embedding, w2_embedding):
+        smashed_words_embedding = T.concatenate([w1_embedding, w2_embedding])
         return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, smashed_words_embedding)
 
-    def loss(self, smashed_words_embedding, actual_similarity):
-        return (self.similarity_symbolic(smashed_words_embedding) - actual_similarity) ** 2
+    def loss(self, w1, w2, actual_similarity):
+        return (self.similarity_symbolic(w1, w2) - actual_similarity) ** 2
 
     # def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding, logistic_scaling_factor=1.0):
     #     score_difference = self.score_symbolic(correct_sequence_embedding) - self.score_symbolic(error_sequence_embedding)
@@ -132,9 +133,7 @@ class SemanticNet(EmbeddingTrainer):
         embeddings = [w1_embedding, w2_embedding]
         training_similarity = T.scalar(name='similarity')
 
-        smashed_embedding = self.embedding_layer.flatten_embeddings(embeddings)
-
-        cost = self.loss(smashed_embedding, training_similarity) + self.L1_reg * self.L1 + self.L2_reg * self.L2_sqr
+        cost = self.loss(w1_embedding, w2_embedding, training_similarity) + self.L1_reg * self.L1 + self.L2_reg * self.L2_sqr
 
         weighted_learning_rate = T.scalar(name='weighted_learning_rate')
 
@@ -152,7 +151,7 @@ class SemanticNet(EmbeddingTrainer):
                                                  updates=updates)
 
         self.similarity = theano.function(inputs=embeddings,
-                                           outputs=self.similarity_symbolic(self.embedding_layer.flatten_embeddings(embeddings)))
+                                           outputs=self.similarity_symbolic(w1_embedding, w2_embedding))
 
     def train(self, w1_index, w2_index, actual_similarity, weighted_learning_rate=0.01):
         w1_embedding = self.embedding_layer.embeddings_from_symbols(w1_index)

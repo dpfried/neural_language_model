@@ -3,7 +3,7 @@ import pandas
 import theano
 import theano.tensor as T
 from model import NLM
-from semantic_network import SemanticDistance
+from semantic_network import SemanticDistance, SemanticNet
 from model import _default_word
 from ngrams import NgramReader
 import numpy as np
@@ -275,12 +275,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('base_dir', help="file to dump model and stats in")
     parser.add_argument('--sampling', default='random', help='semantic_nearest | embedding_nearest | random')
+    parser.add_argument('--semantic_type', default='distance', help='distance | net')
     parser.add_argument('--vocab_size', type=int, default=50000)
     parser.add_argument('--train_proportion', type=float, default=0.95)
     parser.add_argument('--test_proportion', type=float, default=0.0005)
     parser.add_argument('--dimensions', type=int, default=50)
     parser.add_argument('--sequence_length', type=int, default=5)
     parser.add_argument('--n_hidden', type=int, default=200)
+    parser.add_argument('--n_hidden_semantic', type=int, default=50)
     parser.add_argument('--rho', type=float, default=1.0)
     parser.add_argument('--y_init', type=float, default=0.0)
     parser.add_argument('--semantic_gd_rate', type=float, default=0.01)
@@ -386,11 +388,22 @@ if __name__ == "__main__":
 
         if not sem_loaded:
             print 'creating new sem layer'
-            _semantic_model = SemanticDistance(rng=rng,
-                                               vocabulary=vocabulary,
-                                               dimensions=args['dimensions'],
-                                               initial_embeddings=initial_embeddings)
-
+            if args['semantic_type'] == 'distance':
+                print 'using SemanticDistance'
+                _semantic_model = SemanticDistance(rng=rng,
+                                                vocabulary=vocabulary,
+                                                dimensions=args['dimensions'],
+                                                initial_embeddings=initial_embeddings)
+            elif args['semantic_type'] == 'net':
+                print 'using SemanticNet'
+                _semantic_model = SemanticNet(rng=rng, vocabulary=vocabulary,
+                                              dimensions=args['dimensions'],
+                                              n_hidden=args['n_hidden_semantic'],
+                                              L1_reg=0,
+                                              L2_reg=0,
+                                              initial_embeddings=initial_embeddings)
+            else:
+                print 'bad semantic_type (should be distance or net)'
         if not syn_loaded:
             print 'creating new syn layer'
             _syntactic_model = NLM(rng=rng,

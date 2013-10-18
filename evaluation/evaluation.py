@@ -113,8 +113,10 @@ if __name__ == "__main__":
     for stat_name in stat_example:
         plt.figure()
         plt.title(stat_name)
+        print len(all_stats)
         styles = line_styles(len(all_stats))
-        for (model_directory, data), style in zip(sorted(all_stats.items()), styles):
+        for model_directory, style in zip(args.model_directories, styles):
+            data = all_stats[model_directory]
             try:
                 to_plot = data[stat_name]
                 if args.limit:

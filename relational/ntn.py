@@ -1,6 +1,8 @@
 from wordnet_rels import Relationships
 from model_new import EmbeddingLayer, EZPickle, LinearScalarResponse
 import theano.tensor as T
+import numpy as np
+import theano
 
 class TensorLayer(EZPickle):
     # compute f(
@@ -73,45 +75,92 @@ class TensorLayer(EZPickle):
 class NeuralTensorNetwork(EZPickle):
     SHARED = ['learning_rate']
     OTHERS = ['n_hidden',
+              'n_rel',
               'dimensions',
               'embedding_layer',
               'tensor_layer',
               'output_layer',
               'mode',
               'vocabulary',
-              'vocab_size']
+              'vocab_size',
+              'other_params']
 
-    def __init__(self, rng, vocabulary, dimensions, n_hidden, other_params=None, initial_embeddings=None, learning_rate=0.01, mode='FAST_RUN'):
+    def __init__(self, rng, vocabulary, n_rel, dimensions, n_hidden, other_params=None, initial_embeddings=None, learning_rate=0.01, mode='FAST_RUN'):
         if other_params is None:
             other_params = {}
 
         learning_rate = np.cast[theano.config.floatX](learning_rate)
 
         embedding_layer = EmbeddingLayer(rng,
-                                         vocab_size=vocab_size,
+                                         vocab_size=len(vocabulary),
                                          dimensions=dimensions)
 
-        tensor_layer = TensorLayer(rng, dimensions, dimensions, n_hidden)
+        tensor_layer = TensorLayer(rng, n_rel, dimensions, n_hidden)
 
         output_layer = LinearScalarResponse(n_hidden)
 
-
+        # store attributes
         self.init_params(learning_rate=learning_rate,
-                         n_hidden=n_hidden,
+                         n_rel=n_rel,
                          dimensions=dimensions,
+                         n_hidden=n_hidden,
                          mode=mode,
                          vocabulary=vocabulary,
-                         vocab_size=len(vocabulary)
+                         vocab_size=len(vocabulary),
+                         other_params=other_params,
                          embedding_layer=embedding_layer,
                          tensor_layer=tensor_layer,
                          output_layer=output_layer)
 
-        def init_params(self, **kwargs):
-            super(NeuralTensorNetwork, self).init_params(**kwargs)
-            self.make_functions()
+        # wire the network
+        self.make_functions()
 
-        def make_functions(self):
-            # TODO here
+    def apply(self, e1_index, e2_index, rel_index):
+        e1 = self.embedding_layer.embeddings_for_indices(e1_index)
+        e2 = self.embedding_layer.embeddings_for_indices(e2_index)
+        W_rel, V_rel = self.tensor_layer.tensors_for_relation(rel_index)
+
+        tensor_output = self.tensor_layer.apply(W_rel, V_rel, e1, e2)
+
+        output = self.output_layer.apply(tensor_output)
+        return output, e1, e2, W_rel, V_rel
+
+    def make_functions(self):
+        # training function: take an entity, rel, entity triple and return
+        # the cost
+        e1_index_good = T.lscalar('e1_index_good')
+        rel_index_good = T.lscalar('rel_index_good')
+        e2_index_good = T.lscalar('e2_index_good')
+        good_score, e1_good, e2_good, W_rel_good, V_rel_good = self.apply(e1_index_good, e2_index_good, rel_index_good)
+
+        e1_index_bad = T.lscalar('e1_index_bad')
+        rel_index_bad = T.lscalar('rel_index_bad')
+        e2_index_bad = T.lscalar('e2_index_bad')
+        bad_score, e1_bad, e2_bad, W_rel_bad, V_rel_bad = self.apply(e1_index_bad, e2_index_bad, rel_index_bad)
+
+        cost = T.clip(1 - good_score + bad_score, 0, np.inf)
+
+        embedding_indices = T.stack([e1_index_good, e2_index_good, e1_index_bad, e2_index_bad])
+        embeddings = T.stack([e1_good, e2_good, e1_bad, e2_bad])
+
+        # HERE BE DRAGONS - can we take the gradient of stacked subtensors
+        # in this manner????
+        W_rels = T.stack([W_rel_good, W_rel_bad])
+        V_rels = T.stack([V_rel_good, V_rel_bad])
+        rels = T.stack([rel_index_good, rel_index_bad])
+
+        updates = self.embedding_layer.updates_symbolic(cost, embedding_indices, embeddings, self.learning_rate)\
+                + self.tensor_layer.updates_symbolic(cost, rels, W_rels, V_rels, self.learning_rate)\
+                + self.output_layer.updates_symbolic(cost, self.learning_rate)
+
+        self.train = theano.function([e1_index_good, e2_index_good, rel_index_good,
+                                        e1_index_bad, e2_index_bad, rel_index_bad],
+                                        cost,
+                                        updates=updates)
+
+        self.test = theano.function([e1_index_good, e2_index_good, rel_index_good],
+                                    good_score)
+
 
 if __name__ == "__main__":
     relationships = Relationships()

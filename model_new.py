@@ -157,8 +157,8 @@ class EmbeddingLayer(EZPickle):
         # learning_rate: the learning rate (multiplicative constant) for
         # gradient descent
         dembeddings = T.grad(cost, embeddings)
-        return [(self.embedding_layer.embedding, T.inc_subtensor(self.embedding_layer.embedding[indices],
-                                                                 -learning_rate * dembeddings))]
+        return [(self.embedding, T.inc_subtensor(self.embedding[indices],
+                                                 -learning_rate * dembeddings))]
 
     def most_similar_embeddings(self, index, metric='cosine', top_n=10, **kwargs):
         embeddings = self.embedding.get_value()

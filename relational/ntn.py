@@ -13,7 +13,7 @@ class TensorLayer(EZPickle):
     # n_in: input dimensionality
     # n_out: output dimensionality
     # W: a 4d tensor containing a set of 3d relationship tensors. Dimensions: (n_rel, n_out, n_in, n_in)
-    # V: a 3d tensor containing a set of 2d hidden layer matrics. Dimensions: (n_rel, 2*n_in, n_out)
+    # V: a 3d tensor containing a set of 2d hidden layer matrics. Dimensions: (n_rel, n_out, 2*n_in)
 
     def __init__(self, rng, n_rel, n_in, n_out, activation=T.tanh):
         W_size = (n_rel, n_out, n_in, n_in)
@@ -26,7 +26,7 @@ class TensorLayer(EZPickle):
         if activation == T.nnet.sigmoid:
             W_values *= 4
 
-        V_size = (n_rel, 2*n_in, n_out)
+        V_size = (n_rel, n_out, 2*n_in)
         V_values = np.asarray(rng.uniform(
             low=-np.sqrt(6. / (n_in + n_out)),
             high=np.sqrt(6. / (n_in + n_out)),
@@ -133,6 +133,7 @@ class NeuralTensorNetwork(EZPickle):
         e2_index_good = T.lscalar('e2_index_good')
         good_score, e1_good, e2_good, W_rel_good, V_rel_good = self.apply(e1_index_good, e2_index_good, rel_index_good)
 
+
         e1_index_bad = T.lscalar('e1_index_bad')
         rel_index_bad = T.lscalar('rel_index_bad')
         e2_index_bad = T.lscalar('e2_index_bad')
@@ -140,18 +141,29 @@ class NeuralTensorNetwork(EZPickle):
 
         cost = T.clip(1 - good_score + bad_score, 0, np.inf)
 
-        embedding_indices = T.stack([e1_index_good, e2_index_good, e1_index_bad, e2_index_bad])
-        embeddings = T.stack([e1_good, e2_good, e1_bad, e2_bad])
+        # embedding gradient and updates
+        embedding_indices = T.stack(e1_index_good, e2_index_good, e1_index_bad, e2_index_bad)
+        dembeddings = T.stack(*T.grad(cost, [e1_good, e2_good, e1_bad, e2_bad]))
 
-        # HERE BE DRAGONS - can we take the gradient of stacked subtensors
-        # in this manner????
-        W_rels = T.stack([W_rel_good, W_rel_bad])
-        V_rels = T.stack([V_rel_good, V_rel_bad])
-        rels = T.stack([rel_index_good, rel_index_bad])
+        embedding_updates =  [(self.embedding_layer.embedding, T.inc_subtensor(self.embedding_layer.embedding[embedding_indices],
+                                                                              -self.learning_rate * dembeddings))]
 
-        updates = self.embedding_layer.updates_symbolic(cost, embedding_indices, embeddings, self.learning_rate)\
-                + self.tensor_layer.updates_symbolic(cost, rels, W_rels, V_rels, self.learning_rate)\
-                + self.output_layer.updates_symbolic(cost, self.learning_rate)
+        # tensor gradient and updates
+        dW =  T.stack(*T.grad(cost, [W_rel_good, W_rel_bad]))
+        dW_1 = T.grad(cost, W_rel_good)
+        dV = T.stack(*T.grad(cost, [V_rel_good, V_rel_bad]))
+        tensor_indices = T.stack(rel_index_good, rel_index_bad)
+        tensor_updates = [
+            (self.tensor_layer.W, T.inc_subtensor(self.tensor_layer.W[tensor_indices],
+                                                  -self.learning_rate * dW)),
+            (self.tensor_layer.V, T.inc_subtensor(self.tensor_layer.V[tensor_indices],
+                                                  -self.learning_rate * dV))
+        ]
+
+
+        output_updates = self.output_layer.updates_symbolic(cost, self.learning_rate)
+
+        updates = embedding_updates + tensor_updates + output_updates
 
         self.train = theano.function([e1_index_good, e2_index_good, rel_index_good,
                                         e1_index_bad, e2_index_bad, rel_index_bad],

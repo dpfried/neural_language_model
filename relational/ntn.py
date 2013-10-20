@@ -3,6 +3,13 @@ from model_new import EmbeddingLayer, EZPickle, LinearScalarResponse
 import theano.tensor as T
 import numpy as np
 import theano
+import cPickle, gzip
+from utils import models_in_folder
+import os
+import json
+import pandas
+import sys
+import time
 
 class TensorLayer(EZPickle):
     # compute f(
@@ -74,25 +81,25 @@ class TensorLayer(EZPickle):
 
 class NeuralTensorNetwork(EZPickle):
     SHARED = ['learning_rate']
-    OTHERS = ['n_hidden',
+    OTHERS = ['epoch',
+              'n_hidden',
               'n_rel',
               'dimensions',
               'embedding_layer',
               'tensor_layer',
               'output_layer',
               'mode',
-              'vocabulary',
               'vocab_size',
               'other_params']
 
-    def __init__(self, rng, vocabulary, n_rel, dimensions, n_hidden, other_params=None, initial_embeddings=None, learning_rate=0.01, mode='FAST_RUN'):
+    def __init__(self, rng, vocab_size, n_rel, dimensions, n_hidden, other_params=None, initial_embeddings=None, learning_rate=0.01, mode='FAST_RUN'):
         if other_params is None:
             other_params = {}
 
         learning_rate = np.cast[theano.config.floatX](learning_rate)
 
         embedding_layer = EmbeddingLayer(rng,
-                                         vocab_size=len(vocabulary),
+                                         vocab_size=vocab_size,
                                          dimensions=dimensions)
 
         tensor_layer = TensorLayer(rng, n_rel, dimensions, n_hidden)
@@ -100,13 +107,13 @@ class NeuralTensorNetwork(EZPickle):
         output_layer = LinearScalarResponse(n_hidden)
 
         # store attributes
-        self.init_params(learning_rate=learning_rate,
+        self.init_params(epoch=0,
+                         learning_rate=learning_rate,
                          n_rel=n_rel,
                          dimensions=dimensions,
                          n_hidden=n_hidden,
                          mode=mode,
-                         vocabulary=vocabulary,
-                         vocab_size=len(vocabulary),
+                         vocab_size=vocab_size,
                          other_params=other_params,
                          embedding_layer=embedding_layer,
                          tensor_layer=tensor_layer,
@@ -114,6 +121,9 @@ class NeuralTensorNetwork(EZPickle):
 
         # wire the network
         self.make_functions()
+
+    def inc_epoch(self):
+        self.epoch += 1
 
     def apply(self, e1_index, e2_index, rel_index):
         e1 = self.embedding_layer.embeddings_for_indices(e1_index)
@@ -150,7 +160,6 @@ class NeuralTensorNetwork(EZPickle):
 
         # tensor gradient and updates
         dW =  T.stack(*T.grad(cost, [W_rel_good, W_rel_bad]))
-        dW_1 = T.grad(cost, W_rel_good)
         dV = T.stack(*T.grad(cost, [V_rel_good, V_rel_bad]))
         tensor_indices = T.stack(rel_index_good, rel_index_bad)
         tensor_updates = [
@@ -175,8 +184,123 @@ class NeuralTensorNetwork(EZPickle):
 
 
 if __name__ == "__main__":
-    relationships = Relationships()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('base_dir', help="file to dump model and stats in")
+
+    args = vars(parser.parse_args())
+
+    base_dir = args['base_dir']
+
+    relationships_path = os.path.join(base_dir, 'relationships.pkl.gz')
+    # setup training data
+    try:
+        with gzip.open(relationships_path, 'rb') as f:
+            relationships = cPickle.load(f)
+    except:
+        relationships = Relationships()
+        with gzip.open(os.path.join(base_dir, 'relationships.pkl.gz'), 'wb') as f:
+            cPickle.dump(relationships, f)
 
     num_training = int(relationships.N * 0.9)
     training = relationships.data[:num_training]
     testing = relationships.data[num_training:]
+    block_size = training.shape[0]
+    N_synsets = len(relationships.synsets)
+    rng = np.random.RandomState(1234)
+    data_rng = np.random.RandomState(1234)
+
+    stats_fname = os.path.join(base_dir, 'stats.pkl')
+
+
+    # see if this model's already been run. If it has, load it and get the
+    # params
+    models = models_in_folder(base_dir)
+    if models:
+        model_num = max(models.keys())
+        print 'loading existing model %s' % models[model_num]
+        with gzip.open(models[model_num]) as f:
+            ntn_model = cPickle.load(f)
+
+        model_loaded = True
+        args = ntn_model.other_params
+        # rewrite in case we've copied the model file into this folder
+        args['base_dir'] = base_dir
+    else:
+        model_loaded = False
+        # dump the params
+        with open(os.path.join(args['base_dir'], 'params.json'), 'w') as f:
+            json.dump(args, f)
+
+
+        print '... building the model'
+
+        ntn_model = NeuralTensorNetwork(
+            rng=rng,
+            vocab_size=N_synsets,
+            n_rel=len(relationships.relationships),
+            dimensions=50,
+            n_hidden=50,
+            learning_rate=0.01,
+            other_params=args,
+        )
+
+    all_stats = pandas.DataFrame()
+
+    def save_model():
+        fname = os.path.join(args['base_dir'], 'model-%d.pkl.gz' % ntn_model.epoch)
+        sys.stdout.write('dumping model to %s' % fname)
+        sys.stdout.flush()
+        with gzip.open(fname, 'wb') as f:
+            cPickle.dump(ntn_model, f)
+        sys.stdout.write('\r')
+        sys.stdout.flush()
+
+    def save_stats():
+        all_stats.to_pickle(stats_fname)
+
+    if not model_loaded:
+        save_model()
+
+    print '... training'
+
+    last_time = time.clock()
+    block_count = 0
+    block_test_frequency = 1
+    print_freq = 100
+
+
+    while True:
+        ntn_model.inc_epoch()
+
+        costs = []
+
+        stats_for_block = {}
+        for count, row in enumerate(data_rng.permutation(training)):
+            if count % print_freq == 0:
+                sys.stdout.write('\repoch %i: training instance %d of %d (%f %%)\r' % (ntn_model.epoch, count, block_size, 100. * count / block_size))
+                sys.stdout.flush()
+
+            a, b, rel = row
+            b_bad = data_rng.randint(N_synsets)
+
+            # calculate the weight as a function of the correct symbols and error symbols
+            cost = ntn_model.train(a,b,rel,a,b_bad,rel)
+            costs.append(cost)
+
+        this_training_cost = np.mean(costs)
+
+        current_time = time.clock()
+        stats_for_block['time'] = current_time - last_time
+        stats_for_block['training_cost'] = this_training_cost
+
+        sys.stdout.write('\033[k\r')
+        sys.stdout.flush()
+        print 'block %i \t training cost %f %% \t %f seconds' % (block_count, this_training_cost, current_time - last_time)
+        last_time = current_time
+
+        all_stats = pandas.concat([all_stats, pandas.DataFrame(stats_for_block, index=[block_count])])
+        save_stats()
+
+        if ntn_model.epoch % args['save_model_frequency'] == 0:
+            save_model()

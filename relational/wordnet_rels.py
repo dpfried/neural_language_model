@@ -2,6 +2,7 @@ from nltk.corpus import wordnet as wn
 import itertools
 import random
 from functional import mapcan
+import numpy as np
 
 class Relationships(object):
     # names of L{Synset} methods that return other synsets
@@ -23,20 +24,20 @@ class Relationships(object):
         rels = list(self.tuples(wn.all_synsets()))
         random.seed(seed)
         random.shuffle(rels)
-        return rels
+        return np.array(rels)
 
     def indices_to_symbolic(self, indices_tuple):
         """ convert a tuple of indices (i.e. the type stored in self.data)
         into a tuple of Synset, string, Synset"""
         a, rel, b = indices_tuple
-        return self.synsets[a], self.relationships[rel], self.synsets[b]
+        return self.synsets[a], self.synsets[b], self.relationships[rel]
 
     def symbolic_to_indices(self, symbolic_tuple):
         """ convert a tuple of Synset, string, Synset
         into a tuple of indices (i.e. the type stored in self.data)
         """
         a, rel, b = symbolic_tuple
-        return self.indices[a], self.relationships.index(rel), self.indices[b]
+        return self.indices[a],  self.indices[b], self.relationships.index[rel]
 
     def tuples_for_synset(self, synset):
         """
@@ -44,7 +45,7 @@ class Relationships(object):
         where synset_index is the index of this synset
         """
         synset_index = self.indices[synset]
-        return ((synset_index, relation_index, self.indices[other_synset])
+        return ((synset_index, self.indices[other_synset], relation_index)
                 for relation_index, method_name in enumerate(self.relationships) # go through all relation methods
                 for other_synset in getattr(synset, method_name)()) # and call the method, getting a list of synsets in that relationship
 

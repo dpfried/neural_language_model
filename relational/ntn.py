@@ -119,6 +119,9 @@ class NeuralTensorNetwork(EZPickle):
                          tensor_layer=tensor_layer,
                          output_layer=output_layer)
 
+
+    def init_params(self, **kwargs):
+        super(NeuralTensorNetwork, self).init_params(**kwargs)
         # wire the network
         self.make_functions()
 
@@ -187,6 +190,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('base_dir', help="file to dump model and stats in")
+    parser.add_argument('--save_model_frequency', type=int, default=10)
 
     args = vars(parser.parse_args())
 
@@ -209,6 +213,7 @@ if __name__ == "__main__":
     N_synsets = len(relationships.synsets)
     rng = np.random.RandomState(1234)
     data_rng = np.random.RandomState(1234)
+    testing_corruptions = data_rng.randint(0, N_synsets, size=len(testing))
 
     stats_fname = os.path.join(base_dir, 'stats.pkl')
 
@@ -265,7 +270,6 @@ if __name__ == "__main__":
     print '... training'
 
     last_time = time.clock()
-    block_count = 0
     block_test_frequency = 1
     print_freq = 100
 
@@ -296,11 +300,14 @@ if __name__ == "__main__":
 
         sys.stdout.write('\033[k\r')
         sys.stdout.flush()
-        print 'block %i \t training cost %f %% \t %f seconds' % (block_count, this_training_cost, current_time - last_time)
+        print 'block %i \t training cost %f %% \t %f seconds' % (ntn_model.epoch, this_training_cost, current_time - last_time)
         last_time = current_time
 
-        all_stats = pandas.concat([all_stats, pandas.DataFrame(stats_for_block, index=[block_count])])
+        all_stats = pandas.concat([all_stats, pandas.DataFrame(stats_for_block, index=[ntn_model.epoch])])
         save_stats()
+
+        # for count, row in enumerate(testing):
+
 
         if ntn_model.epoch % args['save_model_frequency'] == 0:
             save_model()

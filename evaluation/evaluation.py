@@ -8,6 +8,8 @@ from joint import JointModel
 from utils import models_in_folder, line_styles
 from os.path import split, join
 
+theano.config.on_unused_input = 'warn'
+
 def make_series(model_root_folder,
                 include_synsets=None,
                 normalize_components=False,

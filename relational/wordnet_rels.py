@@ -29,14 +29,14 @@ class Relationships(object):
     def indices_to_symbolic(self, indices_tuple):
         """ convert a tuple of indices (i.e. the type stored in self.data)
         into a tuple of Synset, string, Synset"""
-        a, rel, b = indices_tuple
+        a, b, rel = indices_tuple
         return self.synsets[a], self.synsets[b], self.relationships[rel]
 
     def symbolic_to_indices(self, symbolic_tuple):
         """ convert a tuple of Synset, string, Synset
         into a tuple of indices (i.e. the type stored in self.data)
         """
-        a, rel, b = symbolic_tuple
+        a, b, rel = symbolic_tuple
         return self.indices[a],  self.indices[b], self.relationships.index[rel]
 
     def tuples_for_synset(self, synset):

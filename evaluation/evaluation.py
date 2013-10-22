@@ -8,6 +8,9 @@ from joint import JointModel
 from utils import models_in_folder, line_styles
 from os.path import split, join
 
+# for backward compatability with unpickling models pickled with theano 0.5
+# when unpickling with 0.6
+theano.tensor.basic.Subtensor = theano.tensor.Subtensor
 theano.config.on_unused_input = 'warn'
 
 def make_series(model_root_folder,

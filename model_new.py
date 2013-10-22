@@ -139,7 +139,7 @@ class EmbeddingLayer(EZPickle):
         self.params = []
 
     def _build_functions(self):
-        symbol_index = T.scalar(dtype='int32')
+        symbol_index = T.scalar(dtype='uint64')
         self.embedding_from_symbol = theano.function([symbol_index],
                                                      self.embedding[symbol_index],
                                                      mode=self.mode)
@@ -357,7 +357,7 @@ class NLM(EmbeddingTrainer, EZPickle):
         return self.score_embedding_symbolic(self.embedding_layer.embed_indices_symbolic(sequence_indices))
 
     def symbolic_indices(self, basename):
-        return T.vector(name = basename, dtype='int32')
+        return T.vector(name = basename, dtype='uint64')
         # return [T.scalar(name='%s%i' % (basename, i), dtype='int32') for i in range(self.sequence_length)]
 
     def embed_indices_symbolic(self, indices):

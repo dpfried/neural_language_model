@@ -2,22 +2,31 @@ import json
 import pandas
 import theano
 import theano.tensor as T
-from model import NLM
+from model_new import NLM
 from model import _default_word
 from ngrams import NgramReader
 import numpy as np
-from utils import sample_cumulative_discrete_distribution
-import semantic_module
 import gzip, cPickle
 import sys
 import os
-from utils import models_in_folder
+from utils import models_in_folder, sample_cumulative_discrete_distribution
 import random
 from os.path import join
 from ntn import NeuralTensorNetwork, TensorLayer
 from wordnet_rels import Relationships
 from admm_new import ADMMModel
 import time
+from nltk.corpus import wordnet as wn
+
+class SynsetToWord(object):
+    def __init__(self, vocabulary):
+        vocab = dict((word, index)
+                     for index, word in enumerate(vocabulary))
+        self.words_by_synset = dict(
+            (synset, [vocab[lemma.name] for lemma in synset.lemmas
+                      if lemma.name in vocab])
+            for synset in wn.all_synsets()
+        )
 
 class RelationalADMMModel(ADMMModel):
     def make_theano_semantic_update(self):
@@ -88,24 +97,10 @@ def validate_syntactic(model, testing_block, ngram_reader, rng=None):
     test_weighted_mean = np.mean(np.array(test_values) * np.array(test_frequencies))
     return test_mean, test_weighted_mean
 
-def validate_semantic(model, num_words, num_nearest, word_similarity, rng=None):
-    if rng is None:
-        rng = np.random
-    jaccards = []
-    for i in xrange(num_words):
-        index = rng.randint(model.vocab_size)
-        wn_closest = set(j for (j, sim) in word_similarity.most_similar_indices(index, top_n=num_nearest))
-        embedding_closest = set(j for (j, dist) in model.semantic_model.embedding_layer.most_similar_embeddings(i, top_n=num_nearest))
-        c_intersection = len(wn_closest.intersection(embedding_closest))
-        c_union = len(wn_closest.union(embedding_closest))
-        jaccards.append(float(c_intersection) / c_union)
-    return np.mean(jaccards)
-
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('base_dir', help="file to dump model and stats in")
-    parser.add_argument('--sampling', default='random', help='semantic_nearest | embedding_nearest | random')
     parser.add_argument('--vocab_size', type=int, default=50000)
     parser.add_argument('--train_proportion', type=float, default=0.95)
     parser.add_argument('--test_proportion', type=float, default=0.0005)
@@ -117,10 +112,7 @@ if __name__ == "__main__":
     parser.add_argument('--y_init', type=float, default=0.0)
     parser.add_argument('--semantic_gd_rate', type=float, default=0.01)
     parser.add_argument('--syntactic_gd_rate', type=float, default=0.01)
-    parser.add_argument('--k_nearest', type=int, default=10)
     parser.add_argument('--ngram_filename', default='/cl/nldata/books_google_ngrams_eng/5grams_size3.hd5')
-    parser.add_argument('--word_similarity_file', default='/cl/nldata/books_google_ngrams_eng/wordnet_similarities_max.npy')
-    parser.add_argument('--word_similarity_memmap', default='/tmp/wordnet_similarities_max.memmap', help='use this file as a shared memmap between processes')
     parser.add_argument('--random_seed', type=int, default=1234)
     parser.add_argument('--save_model_frequency', type=int, default=10)
     parser.add_argument('--dont_save_model', action='store_true')
@@ -130,10 +122,11 @@ if __name__ == "__main__":
     parser.add_argument('--syntactic_weight', type=float, default=0.5)
     parser.add_argument('--existing_syntactic_model', help='use this existing trained model as the syntactic model')
     parser.add_argument('--existing_semantic_model', help='use this existing trained model as the semantic model')
-    parser.add_argument('--sem_validation_num_nearest', type=int, default=50, help='when running semantic validation after each round, look at the intersection of top N words in wordnet and top N by embedding for a given test word')
-    parser.add_argument('--sem_validation_num_to_test', type=int, default=500, help='in semantic validation after each round, the number of test words to sample')
+    # parser.add_argument('--sem_validation_num_nearest', type=int, default=50, help='when running semantic validation after each round, look at the intersection of top N words in wordnet and top N by embedding for a given test word')
+    # parser.add_argument('--sem_validation_num_to_test', type=int, default=500, help='in semantic validation after each round, the number of test words to sample')
     parser.add_argument('--dont_run_semantic', action='store_true')
     parser.add_argument('--dont_run_syntactic', action='store_true')
+    parser.add_argument('--mode', default='FAST_RUN')
     args = vars(parser.parse_args())
 
     # if we're only running semantic or syntactic, rho and y init must be 0 to
@@ -177,14 +170,25 @@ if __name__ == "__main__":
 
     replacement_column_index = args['sequence_length'] / 2
 
+    # set up syntactic
     ngram_reader = NgramReader(args['ngram_filename'], vocab_size=args['vocab_size'], train_proportion=args['train_proportion'], test_proportion=args['test_proportion'])
     testing_block = ngram_reader.testing_block()
     vocabulary = ngram_reader.word_array
     print 'corpus contains %i ngrams' % (ngram_reader.number_of_ngrams)
+
+    # set up semantic
+    num_semantic_training = int(relationships.N * 0.98)
+    semantic_training = relationships.data[:num_semantic_training]
+    semantic_testing = relationships.data[num_semantic_training:]
+
     rng = np.random.RandomState(args['random_seed'])
     data_rng = np.random.RandomState(args['random_seed'])
     validation_rng = np.random.RandomState(args['random_seed'] + 1)
     random.seed(args['random_seed'])
+
+    print 'constructing synset to word'
+    synset_to_words = SynsetToWord(vocabulary)
+    print '%d of %d synsets have no words!' % (sum(not names for names in synset_to_words.words_by_synset.values()), len(synset_to_words.words_by_synset))
 
     # construct the admm, possibly using some existing semantic or syntactic
     # model
@@ -227,8 +231,10 @@ if __name__ == "__main__":
             _semantic_model = NeuralTensorNetwork(
                 rng=rng,
                 vocab_size=len(vocabulary),
-                n_rel=relationships.relationships,
-                # learning_rate =
+                n_rel=len(relationships.relationships),
+                dimensions=args['dimensions'],
+                n_hidden=args['n_hidden_semantic'],
+                mode=args['mode'],
             )
         if not syn_loaded:
             print 'creating new syn layer'
@@ -237,11 +243,10 @@ if __name__ == "__main__":
                                    dimensions=args['dimensions'],
                                    sequence_length=args['sequence_length'],
                                    n_hidden=args['n_hidden'],
-                                   L1_reg=0,
-                                   L2_reg=0,
-                                   initial_embeddings=initial_embeddings)
+                                   initial_embeddings=initial_embeddings,
+                                   mode=args['mode'])
 
-        model = ADMMModel(syntactic_model=_syntactic_model,
+        model = RelationalADMMModel(syntactic_model=_syntactic_model,
                             semantic_model=_semantic_model,
                             vocab_size=args['vocab_size'],
                             rho=args['rho'],
@@ -264,9 +269,6 @@ if __name__ == "__main__":
     if not model_loaded:
         save_model()
 
-    print 'loading semantic similarities'
-    word_similarity = semantic_module.WordSimilarity(vocabulary, args['word_similarity_file'], memmap_filename=args['word_similarity_memmap'])
-
     print 'training...'
 
     print_freq = 100
@@ -281,8 +283,6 @@ if __name__ == "__main__":
     blocks_to_run = args.get('syntactic_blocks_to_run', 1)
 
     vocab_size = args['vocab_size']
-    k_nearest = args['k_nearest']
-    sampling = args['sampling']
 
     while True:
         last_time = time.clock()
@@ -337,38 +337,40 @@ if __name__ == "__main__":
 
         # semantic update step
         if not args['dont_run_semantic']:
-            this_count = 0
             costs = []
             augmented_costs = []
-            for i in data_rng.permutation(vocab_size):
-                this_count += 1
-                if i == 0:
-                    continue # skip rare word w/ undef similarities
-                if sampling == 'semantic_nearest':
-                    for j, sim in word_similarity.most_similar_indices(i, top_n=k_nearest):
-                        if sim == -np.inf:
-                            continue
-                        cost, augmented_cost = model.update_semantic(i, j, sim)
-                elif sampling == 'embedding_nearest':
-                    for j, embedding_dist in model.semantic_model.embedding_layer.most_similar_embeddings(i, top_n=k_nearest):
-                        sim = word_similarity.word_pairwise_sims[i, j]
-                        if sim == -np.inf:
-                            continue
-                        cost, augmented_cost = model.update_semantic(i, j, sim)
-                elif sampling == 'random':
-                    for j in random.sample(xrange(vocab_size), k_nearest):
-                        sim = word_similarity.word_pairwise_sims[i, j]
-                        if sim == -np.inf:
-                            continue
-                        cost, augmented_cost = model.update_semantic(i, j, sim)
-                costs.append(cost)
-                augmented_costs.append(augmented_cost)
-
-                if this_count % print_freq == 0:
+            skip_count = 0
+            for i, row in enumerate(semantic_training):
+                if i % print_freq == 0:
                     sys.stdout.write('\r k %i: pair : %d / %d' % (model.k, this_count, vocab_size))
                     sys.stdout.flush()
 
-            print
+                # get a tuple of entity, entity, relation indices
+                a_index, b_index, rel_index = row
+                # get the synsets for each index
+                synset_a, synset_b, rel = relationships.indices_to_symbolic(row)
+                # for each synset, get indices of words in the vocabulary
+                # associated with the synset
+                words_a = synset_to_words.words_by_synset[synset_a]
+                words_b = synset_to_words.words_by_synset[synset_b]
+                # if there aren't any for either, on to the next training
+                # example
+                if not words_a or not words_b:
+                    skip_count += 1
+                    continue
+                # otherwise, randomly choose one and train on it
+                word_a = data_rng.choice(words_a)
+                word_b = data_rng.choice(words_b)
+
+                word_b_bad = sample_cumulative_discrete_distribution(ngram_reader.cumulative_word_frequencies)
+
+                cost, augmented_cost = model.update_semantic(word_a, word_b, rel_index, word_a, word_b_bad, rel_index)
+
+                costs.append(cost)
+                augmented_costs.append(augmented_cost)
+
+
+            print 'skipped %d of %d relations because of missing synsets' % (skip_count, semantic_training.shape[0])
             stats_for_k['semantic_mean'] = np.mean(costs)
             stats_for_k['semantic_std'] = np.std(costs)
             print 'semantic mean cost \t%f' % stats_for_k['semantic_mean']
@@ -379,11 +381,11 @@ if __name__ == "__main__":
             print 'semantic std augmented cost \t%f' % stats_for_k['semantic_std_augmented']
 
             # semantic validation
-            semantic_mean_jaccard = validate_semantic(model, args['sem_validation_num_to_test'], args['sem_validation_num_nearest'], word_similarity, validation_rng)
-            stats_for_k['semantic_validation_mean_jaccard'] = semantic_mean_jaccard
+            # semantic_mean_jaccard = validate_semantic(model, args['sem_validation_num_to_test'], args['sem_validation_num_nearest'], word_similarity, validation_rng)
+            # stats_for_k['semantic_validation_mean_jaccard'] = semantic_mean_jaccard
 
-            print 'validation:'
-            print 'semantic mean jaccard \t%f' % semantic_mean_jaccard
+            # print 'validation:'
+            # print 'semantic mean jaccard \t%f' % semantic_mean_jaccard
 
         if not args['dont_run_semantic'] and not args['dont_run_syntactic']:
             # lagrangian update

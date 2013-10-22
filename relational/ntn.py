@@ -138,6 +138,9 @@ class NeuralTensorNetwork(EZPickle):
         output = self.output_layer.apply(tensor_output)
         return output, e1, e2, W_rel, V_rel
 
+    def embed_indices_symbolic(self, indices):
+        return self.embedding_layer.embed_indices_symbolic(indices)
+
     def make_functions(self):
         # training function: take an entity, rel, entity triple and return
         # the cost
@@ -177,13 +180,16 @@ class NeuralTensorNetwork(EZPickle):
 
         updates = embedding_updates + tensor_updates + output_updates
 
+
         self.train = theano.function([e1_index_good, e2_index_good, rel_index_good,
                                         e1_index_bad, e2_index_bad, rel_index_bad],
                                         cost,
-                                        updates=updates)
+                                        updates=updates,
+                                     mode=self.mode)
 
         self.test = theano.function([e1_index_good, e2_index_good, rel_index_good],
-                                    good_score)
+                                    good_score,
+                                    mode=self.mode)
 
 
 if __name__ == "__main__":

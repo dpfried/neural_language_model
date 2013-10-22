@@ -281,7 +281,7 @@ class NLM(EmbeddingTrainer, EZPickle):
               'vocab_size']
 
     def __init__(self, rng, vocabulary,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01):
-        super(NLM, self).__init__(rng, vocabulary, dimensions)
+        super(NLM,self).__init__(rng, vocabulary, dimensions)
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -368,12 +368,13 @@ class NLM(EmbeddingTrainer, EZPickle):
 
     def updates_symbolic(self, cost, correct_indices, error_indices, correct_sequence_embedding, error_sequence_embedding):
         param_updates = self.hidden_layer.updates_symbolic(cost, self.learning_rate) + self.output_layer.updates_symbolic(cost, self.learning_rate)
-
-        embeddings = T.reshape(T.concatenate([correct_sequence_embedding, error_sequence_embedding]),
-                               (self.sequence_length * 2, self.dimensions))
         indices = T.concatenate([correct_indices, error_indices])
+        dcorrect = T.grad(cost, correct_sequence_embedding)
+        derror = T.grad(cost, error_sequence_embedding)
+        dembeddings = T.reshape(T.concatenate([dcorrect, derror]), (self.sequence_length * 2, self.dimensions))
 
-        embedding_updates = self.embedding_layer.updates_symbolic(cost, indices, embeddings, self.learning_rate)
+        embedding_updates = [(self.embedding_layer.embedding, T.inc_subtensor(self.embedding_layer.embedding[indices],
+                                                                            -self.learning_rate * dembeddings))]
 
         return param_updates + embedding_updates
 

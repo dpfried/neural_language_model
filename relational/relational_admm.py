@@ -29,6 +29,9 @@ class SynsetToWord(object):
         )
 
 class RelationalADMMModel(ADMMModel):
+    def _get_vocabulary(self):
+        return self.embedding_layer.vocabulary
+
     def make_theano_semantic_update(self):
         # should return a function that takes a number of indices: a_good,
         # b_good, rel_good, a_bad, b_bad, rel_bad
@@ -230,7 +233,7 @@ if __name__ == "__main__":
         if not sem_loaded:
             _semantic_model = NeuralTensorNetwork(
                 rng=rng,
-                vocab_size=len(vocabulary),
+                vocabulary=vocabulary,
                 n_rel=len(relationships.relationships),
                 dimensions=args['dimensions'],
                 n_hidden=args['n_hidden_semantic'],
@@ -342,7 +345,7 @@ if __name__ == "__main__":
             skip_count = 0
             for i, row in enumerate(semantic_training):
                 if i % print_freq == 0:
-                    sys.stdout.write('\r k %i: pair : %d / %d' % (model.k, this_count, vocab_size))
+                    sys.stdout.write('\r k %i: pair : %d / %d' % (model.k, i, semantic_training.shape[0]))
                     sys.stdout.flush()
 
                 # get a tuple of entity, entity, relation indices

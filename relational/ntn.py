@@ -1,5 +1,5 @@
 from wordnet_rels import Relationships
-from model_new import EmbeddingLayer, EZPickle, LinearScalarResponse
+from model_new import EmbeddingLayer, EZPickle, LinearScalarResponse, EmbeddingTrainer
 import theano.tensor as T
 import numpy as np
 import theano
@@ -79,7 +79,7 @@ class TensorLayer(EZPickle):
                 (self.W, T.inc_subtensor(self.W[rel], -learning_rate * dW)),
                 (self.V, T.inc_subtensor(self.V[rel], -learning_rate * dV))]
 
-class NeuralTensorNetwork(EZPickle):
+class NeuralTensorNetwork(EmbeddingTrainer, EZPickle):
     SHARED = ['learning_rate']
     OTHERS = ['epoch',
               'n_hidden',
@@ -92,7 +92,10 @@ class NeuralTensorNetwork(EZPickle):
               'vocab_size',
               'other_params']
 
-    def __init__(self, rng, vocab_size, n_rel, dimensions, n_hidden, other_params=None, initial_embeddings=None, learning_rate=0.01, mode='FAST_RUN'):
+    def __init__(self, rng, vocabulary, n_rel, dimensions, n_hidden, other_params=None, initial_embeddings=None, learning_rate=0.01, mode='FAST_RUN'):
+        super(NeuralTensorNetwork, self).__init__(rng, vocabulary, dimensions)
+        vocab_size = len(vocabulary)
+
         if other_params is None:
             other_params = {}
 
@@ -119,6 +122,8 @@ class NeuralTensorNetwork(EZPickle):
                          tensor_layer=tensor_layer,
                          output_layer=output_layer)
 
+    def get_embeddings(self):
+        return self.embedding_layer.get_embeddings()
 
     def init_params(self, **kwargs):
         super(NeuralTensorNetwork, self).init_params(**kwargs)

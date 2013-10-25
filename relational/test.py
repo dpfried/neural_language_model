@@ -8,7 +8,7 @@ VOCAB_SIZE = 5
 SEQ_LENGTH = 5
 VOCAB = map(str, xrange(VOCAB_SIZE))
 
-sem_model = NeuralTensorNetwork(np.random, VOCAB_SIZE, 15, N_DIM, 100)
+sem_model = NeuralTensorNetwork(np.random, VOCAB, 15, N_DIM, 100)
 syn_model = NLM(np.random, VOCAB, N_DIM, SEQ_LENGTH, 100)
 rel_model = RelationalADMMModel(syn_model, sem_model, VOCAB_SIZE , 0.01, {})
 

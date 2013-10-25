@@ -1,0 +1,3 @@
+put some features into the ngram training, e.g. some binary encoding of the possible synsets that a word is associated with
+
+words are not independent embeddings, but some projection of a matrix representing an entity (some sort of generative model)

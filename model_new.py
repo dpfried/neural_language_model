@@ -3,8 +3,16 @@ import theano.tensor as T
 import numpy as np
 from collections import defaultdict
 from scipy.spatial.distance import cdist
+from config import DEFAULT_NGRAM_FILENAME
 
 theano.config.on_unused_input = 'warn' # for unpickling old models
+
+def _default_word():
+    '''have to do this as a module level function b/c otherwise pickle won't
+    let us save the defaultdict inside EmbeddingTrainer'''
+    return '*UNKNOWN*'
+
+default_word = _default_word
 
 class EZPickle(object):
     SHARED = [] # should be overridden by subclasses
@@ -44,14 +52,18 @@ class EmbeddingTrainer(object):
         self.vocabulary = vocabulary
         self.vocab_size = len(self.vocabulary)
 
+        self.dimensions = dimensions
+
+        self._make_lookups()
+
+    def _make_lookups(self):
         try:
             self.symbol_to_word = defaultdict(default_word, dict(enumerate(self.vocabulary)))
             self.symbol_to_word[0] = default_word()
             self.word_to_symbol = defaultdict(int, dict((word, index) for index, word in enumerate(self.vocabulary)))
-        except:
+            print 'made lookups'
+        except Exception as e:
             print 'model has already defined symbol lookup tables'
-
-        self.dimensions = dimensions
 
     def get_embeddings(self):
         pass
@@ -73,13 +85,24 @@ class EmbeddingTrainer(object):
 
     def get_embedding(self, word, normalize_components=False, include_synsets=None):
         """include_synsets not used but need it for interface to evaluation scripts"""
+        if not hasattr(self, 'word_to_symbol') :
+            self._load_vocab(DEFAULT_NGRAM_FILENAME)
         if word not in self.word_to_symbol:
-            print 'warning: %s not in vocab' % word
+            # print 'warning: %s not in vocab' % word
+            pass
         word_embedding = self.get_embeddings()[self.word_to_symbol[word]]
         if normalize_components:
             return word_embedding / np.linalg.norm(word_embedding, 2)
         else:
             return word_embedding
+
+    def _load_vocab(self, filename):
+        from ngrams import NgramReader
+        reader = NgramReader(filename, vocab_size=self.vocab_size)
+        self.vocabulary = reader.word_array
+        self._make_lookups()
+
+
 
 class EmbeddingContainer(EmbeddingTrainer):
     def __init__(self, vocabulary, embeddings):
@@ -143,6 +166,9 @@ class EmbeddingLayer(EZPickle):
         self.embedding_from_symbol = theano.function([symbol_index],
                                                      self.embedding[symbol_index],
                                                      mode=self.mode)
+
+    def get_embeddings(self):
+        return self.embedding.get_value()
 
     def embeddings_for_indices(self, indices):
         return self.embedding[indices]
@@ -325,7 +351,7 @@ class NLM(EmbeddingTrainer, EZPickle):
             return self.vocabulary
         except:
             import ngrams
-            ngram_reader = ngrams.NgramReader(self.other_params['ngram_filename'], vocab_size=self.vocab_size)
+            ngram_reader = ngrams.NgramReader(self.other_params.get('ngram_filename', DEFAULT_NGRAM_FILENAME), vocab_size=self.vocab_size)
             self.vocabulary = ngram_reader.word_array
             return self.vocabulary
 

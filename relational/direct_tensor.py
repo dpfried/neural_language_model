@@ -1,5 +1,5 @@
 from wordnet_rels import Relationships
-from model_new import EmbeddingLayer, EZPickle, EmbeddingTrainer
+from model import EmbeddingLayer, EZPickle, EmbeddingTrainer
 import theano.tensor as T
 import numpy as np
 import theano

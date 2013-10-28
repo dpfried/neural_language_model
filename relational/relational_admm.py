@@ -2,8 +2,7 @@ import json
 import pandas
 import theano
 import theano.tensor as T
-from model_new import NLM
-from model import _default_word
+from model import NLM, _default_word
 from ngrams import NgramReader
 import numpy as np
 import gzip, cPickle
@@ -14,7 +13,7 @@ import random
 from os.path import join
 from ntn import NeuralTensorNetwork, TensorLayer
 from wordnet_rels import Relationships
-from admm_new import ADMMModel
+from admm import ADMMModel
 import time
 from nltk.corpus import wordnet as wn
 

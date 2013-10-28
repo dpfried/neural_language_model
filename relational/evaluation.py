@@ -2,7 +2,7 @@ import grefenstette, semeval, wordsim
 import gzip, cPickle
 import pandas
 from semantic_network import *
-from admm_new import ADMMModel, AnnealingADMMModel
+from admm import ADMMModel, AnnealingADMMModel
 from joint import JointModel
 from utils import models_in_folder, line_styles
 from os.path import split, join

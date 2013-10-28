@@ -1,6 +1,6 @@
 import numpy as np
 from relational.ntn import NeuralTensorNetwork
-from model_new import NLM
+from model import NLM
 from relational.relational_admm import RelationalADMMModel
 
 N_DIM = 50

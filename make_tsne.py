@@ -1,24 +1,37 @@
-import ngrams
 from calc_tsne import calc_tsne
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from query import load_zipped_pickle
+from relational.relational_admm import *
 import gzip
 import cPickle
+from config import DEFAULT_NGRAM_FILENAME
 
-def data_and_dicts(classifier_path, ngram_file='/cl/nldata/books_google_ngrams_eng/5grams_size3.hd5'):
-    classifier = load_zipped_pickle(classifier_path)
-    ngram_reader = ngrams.NgramReader(ngram_file, vocab_size=classifier.vocab_size)
-    return classifier.embedding_layer.embedding, [unicode(w, 'utf-8') for w in ngram_reader.word_array]
+import fix_imports
 
 def do_plot(embedding_layer, words, start=0, end=100):
+    # plot 3d
     X = calc_tsne(embedding_layer[start:end], 3)
     words = words[start:end]
     fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+    ax = fig.add_subplot(121, projection='3d')
     ax.scatter(X[:,0], X[:,1], X[:,2])
     for i in xrange(end-start):
-        ax.text(X[i,0], X[i,1], X[i,2], words[i])
+        try:
+            text = words[i].encode('ascii', 'ignore')
+            ax.text(X[i,0], X[i,1], X[i,2], text)
+        except:
+            pass
+
+    # plot 2d
+    X = calc_tsne(embedding_layer[start:end], 2)
+    ax = fig.add_subplot(122)
+    ax.scatter(X[:,0], X[:,1])
+    for i in xrange(end-start):
+        try:
+            text = words[i].encode('ascii', 'ignore')
+            ax.text(X[i,0], X[i,1], text)
+        except:
+            pass
 
 if __name__ == "__main__":
     import argparse
@@ -31,11 +44,11 @@ if __name__ == "__main__":
     with gzip.open(args.model, 'rb') as f:
         model = cPickle.load(f)
 
-    E = model.embedding_layer.embedding
+    E = model.get_embeddings()
     try:
         vocabulary = model.vocabulary
     except:
-        ngram_filename = model.other_params['ngram_filename']
+        ngram_filename = DEFAULT_NGRAM_FILENAME
         from ngrams import NgramReader
         reader = NgramReader(ngram_filename, vocab_size=model.vocab_size)
         vocabulary = reader.word_array

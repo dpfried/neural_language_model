@@ -64,8 +64,8 @@ class TensorLayer(EZPickle):
     def tensors_for_relation(self, rel):
         return self.W[rel], self.V[rel]
 
-    def apply(self, W_rel, V_rel, e1, e2):
-        return T.dot(T.dot(e1, W_rel), e2) + T.dot(V_rel, T.concatenate([e1, e2])) + self.b
+    def apply(self, W_rel, V_rel, e1W, e2W, e1V, e2V):
+        return T.dot(T.dot(e1W, W_rel), e2W) + T.dot(V_rel, T.concatenate([e1V, e2V])) + self.b
 
     def updates_symbolic(self, cost, rel, W_rel, V_rel, learning_rate):
         # cost: a symbolic cost variable to be differentiated
@@ -138,7 +138,7 @@ class NeuralTensorNetwork(EmbeddingTrainer, EZPickle):
         e2 = self.embedding_layer.embeddings_for_indices(e2_index)
         W_rel, V_rel = self.tensor_layer.tensors_for_relation(rel_index)
 
-        tensor_output = self.tensor_layer.apply(W_rel, V_rel, e1, e2)
+        tensor_output = self.tensor_layer.apply(W_rel, V_rel, e1, e2, e1, e2)
 
         output = self.output_layer.apply(tensor_output)
         return output, e1, e2, W_rel, V_rel
@@ -162,13 +162,14 @@ class NeuralTensorNetwork(EmbeddingTrainer, EZPickle):
 
         cost = T.clip(1 - good_score + bad_score, 0, np.inf)
 
-        # embedding gradient and updates
+
         embedding_indices = T.stack(e1_index_good, e2_index_good, e1_index_bad, e2_index_bad)
         dembeddings = T.stack(*T.grad(cost, [e1_good, e2_good, e1_bad, e2_bad]))
 
         embedding_updates =  [(self.embedding_layer.embedding, T.inc_subtensor(self.embedding_layer.embedding[embedding_indices],
                                                                               -self.learning_rate * dembeddings))]
 
+        # embedding gradient and updates
         # tensor gradient and updates
         dW =  T.stack(*T.grad(cost, [W_rel_good, W_rel_bad]))
         dV = T.stack(*T.grad(cost, [V_rel_good, V_rel_bad]))
@@ -196,12 +197,159 @@ class NeuralTensorNetwork(EmbeddingTrainer, EZPickle):
                                     good_score,
                                     mode=self.mode)
 
+class DistributedNeuralTensorNetwork(EmbeddingTrainer, EZPickle):
+    SHARED = ['learning_rate']
+    OTHERS = ['epoch',
+              'n_hidden',
+              'n_rel',
+              'dimensions',
+              'embedding_layer_W_left',
+              'embedding_layer_W_right',
+              'embedding_layer_V',
+              'tensor_layer',
+              'output_layer',
+              'mode',
+              'vocab_size',
+              'other_params']
 
+    def __init__(self, rng, vocabulary, n_rel, dimensions, n_hidden, other_params=None, initial_embeddings=None, learning_rate=0.01, mode='FAST_RUN'):
+        super(DistributedNeuralTensorNetwork, self).__init__(rng, vocabulary, dimensions)
+        vocab_size = len(vocabulary)
+
+        if other_params is None:
+            other_params = {}
+
+        learning_rate = np.cast[theano.config.floatX](learning_rate)
+
+        embedding_layer_W_left = EmbeddingLayer(rng,
+                                         vocab_size=vocab_size,
+                                         dimensions=dimensions)
+        embedding_layer_W_right = EmbeddingLayer(rng,
+                                         vocab_size=vocab_size,
+                                         dimensions=dimensions)
+        embedding_layer_V = EmbeddingLayer(rng,
+                                         vocab_size=vocab_size,
+                                         dimensions=dimensions)
+
+        tensor_layer = TensorLayer(rng, n_rel, dimensions, n_hidden)
+
+        output_layer = LinearScalarResponse(n_hidden)
+
+        # store attributes
+        self.init_params(epoch=0,
+                         learning_rate=learning_rate,
+                         n_rel=n_rel,
+                         dimensions=dimensions,
+                         n_hidden=n_hidden,
+                         mode=mode,
+                         vocab_size=vocab_size,
+                         other_params=other_params,
+                         embedding_layer_W_left=embedding_layer_W_left,
+                         embedding_layer_W_right=embedding_layer_W_right,
+                         embedding_layer_V=embedding_layer_V,
+                         tensor_layer=tensor_layer,
+                         output_layer=output_layer)
+
+    def get_embeddings(self):
+        return np.concatenate([self.embedding_layer_W_left.get_embeddings(),
+                              self.embedding_layer_W_right.get_embeddings(),
+                              self.embedding_layer_V.get_embeddings()],
+                              axis=1)
+
+    def init_params(self, **kwargs):
+        super(DistributedNeuralTensorNetwork, self).init_params(**kwargs)
+        # wire the network
+        self.make_functions()
+
+    def inc_epoch(self):
+        self.epoch += 1
+
+    def apply(self, e1_index, e2_index, rel_index):
+        e1_W_left = self.embedding_layer_W_left.embeddings_for_indices(e1_index)
+        e2_W_right = self.embedding_layer_W_right.embeddings_for_indices(e2_index)
+        e1_V = self.embedding_layer_V.embeddings_for_indices(e1_index)
+        e2_V = self.embedding_layer_V.embeddings_for_indices(e2_index)
+        W_rel, V_rel = self.tensor_layer.tensors_for_relation(rel_index)
+
+        tensor_output = self.tensor_layer.apply(W_rel, V_rel, e1_W_left, e2_W_right, e1_V, e2_V)
+
+        output = self.output_layer.apply(tensor_output)
+        return output, e1_W_left, e2_W_right, e1_V, e2_V, W_rel, V_rel
+
+    def embed_indices_symbolic(self, indices):
+        return self.embedding_layer.embed_indices_symbolic(indices)
+
+    def make_functions(self):
+        # training function: take an entity, rel, entity triple and return
+        # the cost
+        e1_index_good = T.lscalar('e1_index_good')
+        rel_index_good = T.lscalar('rel_index_good')
+        e2_index_good = T.lscalar('e2_index_good')
+        good_score, e1_W_left_good, e2_W_right_good, e1_V_good, e2_V_good, W_rel_good, V_rel_good = self.apply(e1_index_good, e2_index_good, rel_index_good)
+
+
+        e1_index_bad = T.lscalar('e1_index_bad')
+        rel_index_bad = T.lscalar('rel_index_bad')
+        e2_index_bad = T.lscalar('e2_index_bad')
+        bad_score, e1_W_left_bad, e2_W_right_bad, e1_V_bad, e2_V_bad, W_rel_bad, V_rel_bad = self.apply(e1_index_bad, e2_index_bad, rel_index_bad)
+
+        cost = T.clip(1 - good_score + bad_score, 0, np.inf)
+
+
+        left_indices = T.stack(e1_index_good, e1_index_bad)
+        left_dembedd = T.stack(*T.grad(cost, [e1_W_left_good, e1_W_left_bad]))
+
+        right_indices = T.stack(e2_index_good, e2_index_bad)
+        right_dembedd = T.stack(*T.grad(cost, [e2_W_right_good, e2_W_right_bad]))
+
+        V_indices = T.stack(e1_index_good, e2_index_good, e1_index_bad, e2_index_bad)
+        V_dembedd = T.stack(*T.grad(cost, [e1_V_good, e2_V_good, e1_V_bad, e2_V_bad]))
+
+        embedding_updates = [(self.embedding_layer_W_left.embedding,
+                              T.inc_subtensor(self.embedding_layer_W_left.embedding[left_indices],
+                                              -self.learning_rate * left_dembedd)),
+                             (self.embedding_layer_W_right.embedding,
+                              T.inc_subtensor(self.embedding_layer_W_right.embedding[right_indices],
+                                              -self.learning_rate * right_dembedd)),
+                             (self.embedding_layer_V.embedding,
+                              T.inc_subtensor(self.embedding_layer_V.embedding[V_indices],
+                                              -self.learning_rate * V_dembedd)),
+                             ]
+
+
+        # embedding gradient and updates
+        # tensor gradient and updates
+        dW =  T.stack(*T.grad(cost, [W_rel_good, W_rel_bad]))
+        dV = T.stack(*T.grad(cost, [V_rel_good, V_rel_bad]))
+        tensor_indices = T.stack(rel_index_good, rel_index_bad)
+        tensor_updates = [
+            (self.tensor_layer.W, T.inc_subtensor(self.tensor_layer.W[tensor_indices],
+                                                  -self.learning_rate * dW)),
+            (self.tensor_layer.V, T.inc_subtensor(self.tensor_layer.V[tensor_indices],
+                                                  -self.learning_rate * dV))
+        ]
+
+
+        output_updates = self.output_layer.updates_symbolic(cost, self.learning_rate)
+
+        updates = embedding_updates + tensor_updates + output_updates
+
+
+        self.train = theano.function([e1_index_good, e2_index_good, rel_index_good,
+                                        e1_index_bad, e2_index_bad, rel_index_bad],
+                                        cost,
+                                        updates=updates,
+                                     mode=self.mode)
+
+        self.test = theano.function([e1_index_good, e2_index_good, rel_index_good],
+                                    good_score,
+                                    mode=self.mode)
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('base_dir', help="file to dump model and stats in")
     parser.add_argument('--save_model_frequency', type=int, default=10)
+    parser.add_argument('--distributed', action='store_true')
 
     args = vars(parser.parse_args())
 
@@ -251,9 +399,11 @@ if __name__ == "__main__":
 
         print '... building the model'
 
-        ntn_model = NeuralTensorNetwork(
+        klass = DistributedNeuralTensorNetwork if args['distributed'] else NeuralTensorNetwork
+
+        ntn_model = klass(
             rng=rng,
-            vocab_size=N_synsets,
+            vocabulary=[synset.name for synset in relationships.synsets],
             n_rel=len(relationships.relationships),
             dimensions=50,
             n_hidden=50,

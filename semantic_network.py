@@ -21,9 +21,13 @@ class SemanticDistance(EmbeddingTrainer, EZPickle):
 
     def init_params(self, **kwargs):
         super(SemanticDistance, self).init_params(**kwargs)
-        # no params to update (embeddings are handled separately)
-        self.params = []
+        self.make_stack()
         self.make_functions()
+
+    def make_stack(self):
+        # no params to update (overridden by SemanticNet)
+        self.params = []
+        self.layer_stack = []
 
     def __init__(self, rng, vocabulary, dimensions, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01):
         vocab_size = len(vocabulary)
@@ -87,109 +91,60 @@ class SemanticDistance(EmbeddingTrainer, EZPickle):
     def get_embeddings(self):
         return self.embedding_layer.get_embeddings()
 
-class SemanticNet(EmbeddingTrainer):
-    def __init__(self, rng, vocabulary, dimensions, n_hidden, L1_reg, L2_reg, other_params=None, initial_embeddings=None):
-        super(SemanticNet, self).__init__(rng, vocabulary, dimensions)
+class SemanticNet(SemanticDistance):
+    SHARED = SemanticDistance.SHARED
+
+    OTHERS = SemanticDistance.OTHERS + ['hidden_layer', 'output_layer']
+
+    def init_params(self, **kwargs):
+        super(SemanticNet, self).init_params(**kwargs)
+
+    def make_stack(self):
+        self.params = self.hidden_layer.params + self.output_layer.params
+        self.layer_stack = [self.hidden_layer, self.output_layer]
+
+    def __init__(self, rng, vocabulary, dimensions, n_hidden, other_params=None, initial_embeddings=None, learning_rate=0.01, mode='FAST_RUN'):
+        EmbeddingTrainer.__init__(self, rng, vocabulary, dimensions)
         # initialize parameters
         if other_params is None:
             other_params = {}
-        self.n_hidden = n_hidden
-        self.L1_reg = L1_reg
-        self.L2_reg = L2_reg
 
-        self.other_params = other_params
-        self.blocks_trained = 0
+        embedding_layer = EmbeddingLayer(rng,
+                                         vocab_size=len(vocabulary),
+                                         dimensions=dimensions,
+                                         sequence_length=2,
+                                         initial_embeddings=initial_embeddings)
 
-        self._build_layers(initial_embeddings=initial_embeddings)
-        self._build_functions()
+        hidden_layer = HiddenLayer(rng=rng,
+                                   n_in=dimensions * 2,
+                                   n_out=n_hidden,
+                                   activation=T.tanh)
 
-    def _build_layers(self, initial_embeddings=None):
-        self.embedding_layer = EmbeddingLayer(self.rng, vocab_size=self.vocab_size,
-                                              dimensions=self.dimensions,
-                                              sequence_length=2,
-                                              initial_embeddings=initial_embeddings)
+        output_layer = HiddenLayer(rng=rng,
+                                   n_in=n_hidden,
+                                   n_out=1,
+                                   activation=T.tanh)
 
-        self.hidden_layer = HiddenLayer(rng=self.rng,
-                                        n_in=self.dimensions * 2,
-                                        n_out=self.n_hidden,
-                                        activation=T.tanh)
+        self.init_params(learning_rate=0.01,
+                         blocks_trained=0,
+                         mode=mode,
+                         dimensions=dimensions,
+                         other_params=other_params,
+                         vocab_size=len(vocabulary),
+                         embededing_layer=embedding_layer,
+                         hidden_layer=hidden_layer,
+                         output_layer=output_layer,
+                         )
 
-        self.output_layer = HiddenLayer(rng=self.rng,
-                                        n_in=self.n_hidden,
-                                        n_out=1,
-                                        activation=T.tanh)
-
-        self.layer_stack = [self.hidden_layer, self.output_layer]
-        self.params = self.hidden_layer.params + self.output_layer.params
-
-        self.L1 = abs(self.hidden_layer.W).sum() + abs(self.output_layer.W).sum()
-
-        self.L2_sqr = (self.hidden_layer.W ** 2).sum() + (self.output_layer.W ** 2).sum()
-
-    def similarity_symbolic(self, smashed_words_embedding):
+    def similarity_symbolic(self, w1, w2):
+        smashed_words_embedding = T.concatenate([w1, w2])
         return reduce(lambda layer_input, layer: layer.apply(layer_input), self.layer_stack, smashed_words_embedding)
 
-    def loss(self, smashed_words_embedding, actual_similarity):
-        return (self.similarity_symbolic(smashed_words_embedding) - actual_similarity) ** 2
-
-    # def compare_symbolic(self, correct_sequence_embedding, error_sequence_embedding, logistic_scaling_factor=1.0):
-    #     score_difference = self.score_symbolic(correct_sequence_embedding) - self.score_symbolic(error_sequence_embedding)
-    #     return T.log(1 + T.exp(logistic_scaling_factor * -1 * score_difference))
-
-    def _build_functions(self):
-        # create symbolic variables for correct and error input
-        w1_embedding = T.vector(name='w1_embedding')
-        w2_embedding = T.vector(name='w2_embedding')
-        embeddings = [w1_embedding, w2_embedding]
-        training_similarity = T.scalar(name='similarity')
-
-        smashed_embedding = self.embedding_layer.flatten_embeddings(embeddings)
-
-        cost = self.loss(smashed_embedding, training_similarity) + self.L1_reg * self.L1 + self.L2_reg * self.L2_sqr
-
-        weighted_learning_rate = T.scalar(name='weighted_learning_rate')
-
-        # update the params of the model using the gradients
-        updates = [(param, param - weighted_learning_rate * T.grad(cost, param))
-                   for param in self.params]
-
-        dembeddings = T.grad(cost, embeddings)
-
-        inputs = embeddings + [training_similarity] + [weighted_learning_rate]
-        outputs = dembeddings + [cost]
-
-        self.training_function = theano.function(inputs=inputs,
-                                                 outputs=outputs,
-                                                 updates=updates,
-                                                 mode=self.mode)
-
-        self.similarity = theano.function(inputs=embeddings,
-                                           outputs=self.similarity_symbolic(self.embedding_layer.flatten_embeddings(embeddings)),
-                                          mode=self.mode)
-
-    def train(self, w1_index, w2_index, actual_similarity, weighted_learning_rate=0.01):
-        w1_embedding = self.embedding_layer.embeddings_from_symbols(w1_index)
-        w2_embedding = self.embedding_layer.embeddings_from_symbols(w2_index)
-
-        dw1, dw2, cost = self.training_function(w1_embedding,
-                                                w2_embedding,
-                                                actual_similarity,
-                                                weighted_learning_rate)
-
-        w1_update = -weighted_learning_rate * dw1
-        w2_update = -weighted_learning_rate * dw2
-
-        self.embedding_layer.update_embeddings([w1_index, w2_index], [w1_update, w2_update])
-
-        return cost, w1_update, w2_update
-
-    def score(self, w1_index, w2_index):
-        w1_embedding = self.embedding_layer.embeddings_from_symbols(w1_index)
-        w2_embedding = self.embedding_layer.embeddings_from_symbols(w2_index)
-        return self.similarity(w1_embedding, w2_embedding)
-
-    def get_embeddings(self):
-        return self.embedding_layer.get_embeddings()
+    def updates_symbolic(self, cost, index1, index2, w1, w2):
+        embedding_updates = super(SemanticNet, self).updates_symbolic(cost, index1, index2, w1, w2)
+        other_updates = [(param, param - self.learning_rate * T.grad(cost, param))
+                         for param in self.params]
+        return other_updates + embedding_updates
 
 if __name__ == "__main__":
     import argparse

@@ -1,7 +1,7 @@
 import pandas
 import matplotlib.pyplot as plt
 import numpy as np
-from os.path import join, split
+import os
 import json
 from utils import line_styles
 
@@ -55,8 +55,8 @@ if __name__ == "__main__":
     params = []
     for model_dir in args.model_directories:
         try:
-            _stats = pandas.read_pickle(join(model_dir, 'stats.pkl'))
-            with open(join(model_dir, 'params.json')) as f:
+            _stats = pandas.read_pickle(os.path.join(model_dir, 'stats.pkl'))
+            with open(os.path.join(model_dir, 'params.json')) as f:
                 _params = json.load(f)
 
         except Exception as e:
@@ -86,7 +86,12 @@ if __name__ == "__main__":
         try:
             plt.figure()
             plt.title(plot_tile)
-            plot_stats_function(fn, stats, params, [split(d)[1] for d in args.model_directories])
+            # for printing the names of models
+            common_prefix = os.path.commonprefix(args.model_directories)
+            def suffix(model_directory):
+                return os.path.relpath(model_directory, common_prefix)
+
+            plot_stats_function(fn, stats, params, [suffix(d) for d in args.model_directories])
         except Exception as e:
             print e
     plt.show()

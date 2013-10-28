@@ -6,7 +6,8 @@ from model import _default_word
 from admm import ADMMModel, AnnealingADMMModel
 from joint import JointModel
 from utils import models_in_folder, line_styles
-from os.path import split, join
+from os.path import join
+import os
 
 # for backward compatability with unpickling models pickled with theano 0.5
 # when unpickling with 0.6
@@ -113,6 +114,14 @@ if __name__ == "__main__":
         print name
         print s
 
+    # for printing the names of models
+    common_prefix = os.path.commonprefix(args.model_directories)
+    def suffix(model_directory):
+        if common_prefix != model_directory:
+            return os.path.relpath(model_directory, common_prefix)
+        else:
+            return model_directory
+
     stat_example = [s for s in all_stats.values() if len(s) != 0][0]
     import matplotlib.pyplot as plt
     for stat_name in stat_example:
@@ -126,7 +135,7 @@ if __name__ == "__main__":
                 to_plot = data[stat_name]
                 if args.limit:
                     to_plot = to_plot[to_plot.index <= args.limit]
-                to_plot.plot(label=split(model_directory)[1], style=style)
+                to_plot.plot(label=suffix(model_directory), style=style)
             except Exception as e:
                 print 'exception'
                 print stat_name, model_directory

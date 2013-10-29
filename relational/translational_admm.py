@@ -11,24 +11,13 @@ import os
 from utils import models_in_folder, sample_cumulative_discrete_distribution
 import random
 from os.path import join
-from relational.ntn import NeuralTensorNetwork, TensorLayer
+from relational.translation import TranslationNetwork
 from relational.wordnet_rels import Relationships
+from relational.relational_admm import SynsetToWord, validate_syntactic
 from admm import ADMMModel
 import time
-from nltk.corpus import wordnet as wn
-import fix_imports
 
-class SynsetToWord(object):
-    def __init__(self, vocabulary):
-        vocab = dict((word, index)
-                     for index, word in enumerate(vocabulary))
-        self.words_by_synset = dict(
-            (synset, [vocab[lemma.name] for lemma in synset.lemmas
-                      if lemma.name in vocab])
-            for synset in wn.all_synsets()
-        )
-
-class RelationalADMMModel(ADMMModel):
+class TranslationalADMMModel(ADMMModel):
     def _get_vocabulary(self):
         return self.embedding_layer.vocabulary
 
@@ -46,59 +35,29 @@ class RelationalADMMModel(ADMMModel):
          # using the apply method
         w, v, y = self.embeddings_and_y_symbolic(T.stack(a_good, b_good), T.stack(a_bad, b_bad))[-3:]
 
-        # W and V have nothing to do with w and v: W and V are the tensor and
-        # matrix parameters, respectively for the relational network. w and v
-        #are the embeddings of the syntactic and semantic models, respectively.
-        # this is terrible, clean it up if this actually works
-        good_score, ea_good, eb_good, W_rel_good, V_rel_good = self.semantic_model.apply(a_good, b_good, rel_good)
-        bad_score, ea_bad, eb_bad, W_rel_bad, V_rel_bad = self.semantic_model.apply(a_bad, b_bad, rel_bad)
+        good_score, ea_good, eb_good, R_good = self.semantic_model.apply(a_good, b_good, rel_good)
+        bad_score, ea_bad, eb_bad, R_bad = self.semantic_model.apply(a_bad, b_bad, rel_bad)
 
         cost = T.clip(1 - good_score + bad_score, 0, np.inf)
         augmented_cost = (1 - self.syntactic_weight) * cost + self.admm_penalty(w, v, y)
 
         embedding_indices = T.stack(a_good, b_good, a_bad, b_bad)
-        dembeddings = T.stack(*T.grad(augmented_cost, [ea_good, eb_good, ea_bad, eb_bad]))
+        embeddings = [ea_good, eb_good, ea_bad, eb_bad]
 
-        embedding_updates =  [(self.semantic_model.embedding_layer.embedding, T.inc_subtensor(self.semantic_model.embedding_layer.embedding[embedding_indices],
-                                                                              -self.semantic_model.learning_rate * dembeddings))]
+        embedding_updates = self.semantic_model.embedding_layer.updates_symbolic(augmented_cost, embedding_indices, embeddings, self.semantic_model.learning_rate)
 
         # tensor gradient and updates
-        dW =  T.stack(*T.grad(augmented_cost, [W_rel_good, W_rel_bad]))
-        dV = T.stack(*T.grad(augmented_cost, [V_rel_good, V_rel_bad]))
-        tensor_indices = T.stack(rel_good, rel_bad)
-        tensor_updates = [
-            (self.semantic_model.tensor_layer.W, T.inc_subtensor(self.semantic_model.tensor_layer.W[tensor_indices],
-                                                  -self.semantic_model.learning_rate * dW)),
-            (self.semantic_model.tensor_layer.V, T.inc_subtensor(self.semantic_model.tensor_layer.V[tensor_indices],
-                                                  -self.semantic_model.learning_rate * dV))
-        ]
+        relation_updates = self.semantic_model.relation_layer.updates_symbolic(augmented_cost,
+                                                                               [rel_good, rel_bad],
+                                                                               [R_good, R_bad],
+                                                                               self.semantic_model.learning_rate)
 
-        output_updates = self.semantic_model.output_layer.updates_symbolic(augmented_cost, self.semantic_model.learning_rate)
-
-        updates = embedding_updates + tensor_updates + output_updates
+        updates = embedding_updates + relation_updates
 
         return theano.function(inputs=[a_good, b_good, rel_good, a_bad, b_bad, rel_bad],
                                outputs=[cost, augmented_cost],
                                updates=updates,
                                mode=self.mode)
-
-def validate_syntactic(model, testing_block, ngram_reader, rng=None, print_freq=None, replacement_column_index=2):
-    if rng is None:
-        rng = np.random
-
-    test_values = []
-    test_frequencies = []
-    n_test_instances = testing_block.shape[0]
-    for test_index in xrange(n_test_instances):
-        if print_freq and test_index % print_freq == 0:
-            sys.stdout.write('\rtesting instance %d of %d (%f %%)\r' % (test_index, n_test_instances, 100. * test_index / n_test_instances))
-            sys.stdout.flush()
-        correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(testing_block[test_index], replacement_column_index=replacement_column_index, rng=rng)
-        test_values.append(model.syntactic_model.score(correct_symbols) - model.syntactic_model.score(error_symbols))
-        test_frequencies.append(ngram_frequency)
-    test_mean = np.mean(test_values)
-    test_weighted_mean = np.mean(np.array(test_values) * np.array(test_frequencies))
-    return test_mean, test_weighted_mean
 
 if __name__ == "__main__":
     import argparse
@@ -171,6 +130,7 @@ if __name__ == "__main__":
         with gzip.open(relationship_path, 'wb') as f:
             cPickle.dump(relationships, f)
 
+    N_relationships = len(relationships.relationships)
     replacement_column_index = args['sequence_length'] / 2
 
     # set up syntactic
@@ -231,14 +191,13 @@ if __name__ == "__main__":
             sem_loaded = False
 
         if not sem_loaded:
-            _semantic_model = NeuralTensorNetwork(
+            _semantic_model = TranslationNetwork(
                 rng=rng,
                 vocabulary=vocabulary,
                 n_rel=len(relationships.relationships),
                 dimensions=args['dimensions'],
-                n_hidden=args['n_hidden_semantic'],
-                mode=args['mode'],
                 initial_embeddings=initial_embeddings,
+                mode=args['mode'],
             )
         if not syn_loaded:
             print 'creating new syn layer'
@@ -250,7 +209,7 @@ if __name__ == "__main__":
                                    initial_embeddings=initial_embeddings,
                                    mode=args['mode'])
 
-        model = RelationalADMMModel(syntactic_model=_syntactic_model,
+        model = TranslationalADMMModel(syntactic_model=_syntactic_model,
                             semantic_model=_semantic_model,
                             vocab_size=args['vocab_size'],
                             rho=args['rho'],
@@ -329,7 +288,7 @@ if __name__ == "__main__":
             print 'syntactic std augmented cost \t%f' % stats_for_k['syntactic_std_augmented']
 
             # syntactic validation
-            syn_validation_mean, syn_validation_weighted_mean = validate_syntactic(model, testing_block, ngram_reader, validation_rng, print_freq, replacement_column_index)
+            syn_validation_mean, syn_validation_weighted_mean = validate_syntactic(model, testing_block, ngram_reader, validation_rng, print_freq=print_freq, replacement_column_index=replacement_column_index)
             stats_for_k['syntactic_validation_mean_score'] = syn_validation_mean
             stats_for_k['syntactic_validation_weighted_mean_score'] = syn_validation_weighted_mean
 
@@ -344,10 +303,12 @@ if __name__ == "__main__":
             costs = []
             augmented_costs = []
             skip_count = 0
-            for i, row in enumerate(semantic_training):
+            for i in xrange(semantic_training.shape[0]):
                 if i % print_freq == 0:
                     sys.stdout.write('\r k %i: pair : %d / %d' % (model.k, i, semantic_training.shape[0]))
                     sys.stdout.flush()
+
+                row = semantic_training[data_rng.choice(semantic_training.shape[0])]
 
                 # get a tuple of entity, entity, relation indices
                 a_index, b_index, rel_index = row
@@ -366,9 +327,23 @@ if __name__ == "__main__":
                 word_a = data_rng.choice(words_a)
                 word_b = data_rng.choice(words_b)
 
-                word_b_bad = sample_cumulative_discrete_distribution(ngram_reader.cumulative_word_frequencies)
+                word_a_new, word_b_new, rel_index_new = word_a, word_b, rel_index
 
-                cost, augmented_cost = model.update_semantic(word_a, word_b, rel_index, word_a, word_b_bad, rel_index)
+                # choose to corrupt one part of the triple
+                to_mod = data_rng.choice(3)
+
+                # corrupt with some other part
+                if to_mod == 0:
+                    while word_a_new == word_a:
+                        word_a_new = sample_cumulative_discrete_distribution(ngram_reader.cumulative_word_frequencies, rng=data_rng)
+                elif to_mod == 1:
+                    while word_b_new == word_b:
+                        word_b_new = sample_cumulative_discrete_distribution(ngram_reader.cumulative_word_frequencies, rng=data_rng)
+                elif to_mod == 2:
+                    while rel_index_new == rel_index:
+                        rel_index_new = data_rng.randint(N_relationships)
+
+                cost, augmented_cost = model.update_semantic(word_a, word_b, rel_index, word_a_new, word_b_new, rel_index_new)
 
                 costs.append(cost)
                 augmented_costs.append(augmented_cost)

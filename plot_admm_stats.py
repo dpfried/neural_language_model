@@ -5,7 +5,7 @@ import os
 import json
 from utils import line_styles
 
-def plot_stats_function(function, statss, paramss, labels=None, output_file=None):
+def plot_stats_function(function, statss, paramss, labels=None, output_file=None, limit=0):
     """
     function should take a L{pandas.DataFrame} and a dictionary and return a L{pandas.DataFrame}
     which will be plotted.
@@ -18,7 +18,10 @@ def plot_stats_function(function, statss, paramss, labels=None, output_file=None
         if labels:
             label = labels[i]
         try:
-            function(stats, params).plot(style=style, label=label)
+            to_plot = function(stats, params)
+            if limit:
+                to_plot = to_plot[:limit]
+            to_plot.plot(style=style, label=label)
         except Exception as e:
             print e
     plt.legend(loc='best').get_frame().set_alpha(0.6)
@@ -49,6 +52,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('model_directories', nargs='+')
+    parser.add_argument('--limit', type=int, default=0)
     args = parser.parse_args()
 
     stats = []
@@ -91,7 +95,7 @@ if __name__ == "__main__":
             def suffix(model_directory):
                 return os.path.relpath(model_directory, common_prefix)
 
-            plot_stats_function(fn, stats, params, [suffix(d) for d in args.model_directories])
+            plot_stats_function(fn, stats, params, [suffix(d) for d in args.model_directories], limit=args.limit)
         except Exception as e:
             print e
     plt.show()

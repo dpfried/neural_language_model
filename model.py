@@ -126,9 +126,9 @@ class EmbeddingLayer(EZPickle):
     OTHERS = [('mode', 'FAST_RUN'),
               'vocab_size',
               'dimensions',
-              'sequence_length']
+              ]
 
-    def __init__(self, rng, vocab_size, dimensions, sequence_length=5, initial_embedding_range=0.01, initial_embeddings=None, mode='FAST_RUN'):
+    def __init__(self, rng, vocab_size, dimensions, initial_embedding_range=0.01, initial_embeddings=None, mode='FAST_RUN'):
         """ Initialize the parameters of the embedding layer
 
         :type rng: nympy.random.RandomState
@@ -142,8 +142,6 @@ class EmbeddingLayer(EZPickle):
         :param dimensions: the number of dimensions in the distributed
         representation.
 
-        :type sequence_length: int
-        :param sequence_length: the number of words in each n-gram
         """
 
         embedding_shape = (vocab_size, dimensions)
@@ -158,7 +156,6 @@ class EmbeddingLayer(EZPickle):
 
         self.init_params(vocab_size=vocab_size,
                          dimensions=dimensions,
-                         sequence_length=sequence_length,
                          mode=mode,
                          embedding=initial_embeddings)
 
@@ -183,22 +180,29 @@ class EmbeddingLayer(EZPickle):
     def embed_indices_symbolic(self, indices):
         return T.flatten(self.embeddings_for_indices(indices))
 
-    def updates_symbolic(self, cost, indices, embeddings, learning_rate):
+    def updates_symbolic(self, cost, index_list, embedding_list, learning_rate):
         # cost: a symbolic cost function
-        # indices: a vector of length N
-        # embeddings: a matrix of dimensions N x dimensions
+        # index_list: a list of indices into the matrix
+        # embedding_list: a list of symbolic embeddings, one for each index in
+        # index_list, to be updated with gradient descent
         # learning_rate: the learning rate (multiplicative constant) for
         # gradient descent
-        dembeddings = T.grad(cost, embeddings)
-        return [(self.embedding, T.inc_subtensor(self.embedding[indices],
+
+        embedding_indices = T.stack(*index_list)
+        dembeddings = T.stack(*T.grad(cost, embedding_list))
+
+        return [(self.embedding, T.inc_subtensor(self.embedding[embedding_indices],
                                                  -learning_rate * dembeddings))]
+
+    def most_similar_to(self, embedding, metric='cosine', top_n=10, **kwargs):
+        C = cdist(embedding[np.newaxis,:], self.embedding.get_value(), metric, **kwargs)
+        sims = C[0]
+        return [(i, sims[i]) for i in np.argsort(sims)[:top_n]]
 
     def most_similar_embeddings(self, index, metric='cosine', top_n=10, **kwargs):
         embeddings = self.embedding.get_value()
         this_embedding = embeddings[index]
-        C = cdist(this_embedding[np.newaxis,:], embeddings, metric, **kwargs)
-        sims = C[0]
-        return [(i, sims[i]) for i in np.argsort(sims)[:top_n]]
+        return self.most_similar_to(this_embedding, metric=metrics,top_n=top_n, **kwargs)
 
 class LinearScalarResponse(EZPickle):
     SHARED = ['W', 'b']
@@ -324,9 +328,10 @@ class NLM(EmbeddingTrainer, EZPickle):
 
         learning_rate = np.cast[theano.config.floatX](learning_rate)
 
-        embedding_layer = EmbeddingLayer(rng, vocab_size=vocab_size,
+        embedding_layer = EmbeddingLayer(rng,
+                                         vocab_size=vocab_size,
                                          dimensions=dimensions,
-                                         sequence_length=sequence_length)
+                                         initial_embeddings=initial_embeddings)
 
         hidden_layer = HiddenLayer(rng=rng,
                                    n_in=dimensions * sequence_length,

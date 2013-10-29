@@ -92,7 +92,7 @@ class NeuralTensorNetwork(EmbeddingTrainer, EZPickle):
               'vocab_size',
               'other_params']
 
-    def __init__(self, rng, vocabulary, n_rel, dimensions, n_hidden, other_params=None, initial_embeddings=None, learning_rate=0.01, mode='FAST_RUN'):
+    def __init__(self, rng, vocabulary, n_rel, dimensions, n_hidden, other_params=None, learning_rate=0.01, mode='FAST_RUN', initial_embeddings=None):
         super(NeuralTensorNetwork, self).__init__(rng, vocabulary, dimensions)
         vocab_size = len(vocabulary)
 
@@ -103,7 +103,8 @@ class NeuralTensorNetwork(EmbeddingTrainer, EZPickle):
 
         embedding_layer = EmbeddingLayer(rng,
                                          vocab_size=vocab_size,
-                                         dimensions=dimensions)
+                                         dimensions=dimensions,
+                                         initial_embeddings=initial_embeddings)
 
         tensor_layer = TensorLayer(rng, n_rel, dimensions, n_hidden)
 
@@ -163,11 +164,10 @@ class NeuralTensorNetwork(EmbeddingTrainer, EZPickle):
         cost = T.clip(1 - good_score + bad_score, 0, np.inf)
 
 
-        embedding_indices = T.stack(e1_index_good, e2_index_good, e1_index_bad, e2_index_bad)
-        dembeddings = T.stack(*T.grad(cost, [e1_good, e2_good, e1_bad, e2_bad]))
+        embedding_indices = [e1_index_good, e2_index_good, e1_index_bad, e2_index_bad]
+        embeddings = [e1_good, e2_good, e1_bad, e2_bad]
 
-        embedding_updates =  [(self.embedding_layer.embedding, T.inc_subtensor(self.embedding_layer.embedding[embedding_indices],
-                                                                              -self.learning_rate * dembeddings))]
+        embedding_updates = self.embedding_layer.updates_symbolic(cost, embedding_indices, embeddings, self.learning_rate)
 
         # embedding gradient and updates
         # tensor gradient and updates
@@ -212,7 +212,7 @@ class DistributedNeuralTensorNetwork(EmbeddingTrainer, EZPickle):
               'vocab_size',
               'other_params']
 
-    def __init__(self, rng, vocabulary, n_rel, dimensions, n_hidden, other_params=None, initial_embeddings=None, learning_rate=0.01, mode='FAST_RUN'):
+    def __init__(self, rng, vocabulary, n_rel, dimensions, n_hidden, other_params=None, learning_rate=0.01, mode='FAST_RUN'):
         super(DistributedNeuralTensorNetwork, self).__init__(rng, vocabulary, dimensions)
         vocab_size = len(vocabulary)
 
@@ -447,7 +447,9 @@ if __name__ == "__main__":
                 sys.stdout.flush()
 
             a, b, rel = row
-            b_bad = data_rng.randint(N_synsets)
+            b_bad = b
+            while b_bad == b:
+                b_bad = data_rng.randint(N_synsets)
 
             # calculate the weight as a function of the correct symbols and error symbols
             cost = ntn_model.train(a,b,rel,a,b_bad,rel)

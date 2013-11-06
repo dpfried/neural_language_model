@@ -59,6 +59,9 @@ class TranslationalADMMModel(ADMMModel):
                                updates=updates,
                                mode=self.mode)
 
+    def scored_candidates(self, a, rel):
+        return sorted([(model.test(a, b, rel), b) for b in xrange(len(relationships.synsets))], reverse=True)
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()

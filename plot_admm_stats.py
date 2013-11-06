@@ -28,6 +28,17 @@ def plot_stats_function(function, statss, paramss, labels=None, output_file=None
     if output_file:
         plt.savefig(output_file, bbox_inches='tight')
 
+def plot_loss_curves(stats_frame, limit=0):
+    """take a single stats frame and plot the unaugmented syntactic, semantic, and combined loss"""
+    if limit:
+        stats_frame = stats_frame[:limit]
+    stats_frame['joint_loss'] = stats_frame.semantic_mean + stats_frame.syntactic_mean
+    stats_frame['syntactic_loss'] = stats_frame.syntactic_mean
+    stats_frame['semantic_loss'] = stats_frame.semantic_mean
+    stats_frame[['semantic_loss', 'syntactic_loss', 'joint_loss']].plot()
+    plt.xlabel('ADMM Iterations')
+    plt.ylabel('Loss')
+
 def plot_figs(stats_frame, output_base=None, description=""):
     stats_frame[['semantic_mean', 'syntactic_mean']].plot()
     plt.title('loss %s' % description)

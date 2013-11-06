@@ -9,6 +9,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model_path')
     parser.add_argument('relationships_path')
+    parser.add_argument('--train_words', action='store_true', help='vocabulary is words sampled from synsets, instead of synsets')
     args = parser.parse_args()
 
     print 'loading model from %s' % args.model_path
@@ -19,7 +20,7 @@ if __name__ == "__main__":
     with gzip.open(args.relationships_path) as f:
         relationships = cPickle.load(f)
 
-    num_training = int(relationships.N * 0.9)
+    num_training = int(relationships.N * 0.98)
     training = relationships.data[:num_training]
     testing = relationships.data[num_training:]
 

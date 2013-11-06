@@ -5,11 +5,13 @@ import theano
 import os
 import gzip, cPickle
 from relational.wordnet_rels import Relationships
+from relational.relational_admm import SynsetToWord
 from utils import models_in_folder
 import pandas
 import json
 import sys
 import time
+from ngrams import NgramReader
 
 class TranslationLayer(EZPickle):
     SHARED = ["R"]
@@ -152,6 +154,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('base_dir', help="file to dump model and stats in")
     parser.add_argument('--save_model_frequency', type=int, default=10)
+    parser.add_argument('--train_words', action='store_true', help='vocabulary is words sampled from synsets, instead of synsets')
+    parser.add_argument('--vocab_size', type=int, default=50000, help='only valid with train_words')
+    parser.add_argument('--ngram_filename', default='/cl/nldata/books_google_ngrams_eng/5grams_size3.hd5', help='only valid with train_words')
 
     args = vars(parser.parse_args())
 
@@ -171,11 +176,17 @@ if __name__ == "__main__":
     training = relationships.data[:num_training]
     testing = relationships.data[num_training:]
     block_size = training.shape[0]
-    N_synsets = len(relationships.synsets)
+    if args['train_words']:
+        ngram_reader = NgramReader(args['ngram_filename'], vocab_size=args['vocab_size'])
+        vocabulary = ngram_reader.word_array
+        synset_to_words = SynsetToWord(vocabulary)
+    else:
+        vocabulary = relationships.synsets
+    vocab_size = len(vocabulary)
     N_relationships = len(relationships.relationships)
     rng = np.random.RandomState(1234)
     data_rng = np.random.RandomState(1234)
-    testing_corruptions = data_rng.randint(0, N_synsets, size=len(testing))
+    testing_corruptions = data_rng.randint(0, vocab_size, size=len(testing))
 
     stats_fname = os.path.join(base_dir, 'stats.pkl')
 
@@ -204,7 +215,7 @@ if __name__ == "__main__":
 
         translation_model = TranslationNetwork(
             rng=rng,
-            vocabulary=[synset.name for synset in relationships.synsets],
+            vocabulary=vocabulary,
             n_rel=N_relationships,
             dimensions=50,
             learning_rate=0.01,
@@ -241,13 +252,35 @@ if __name__ == "__main__":
         costs = []
 
         stats_for_block = {}
+        skip_count = 0
         for count in xrange(block_size):
             row = training[data_rng.choice(block_size)]
             if count % print_freq == 0:
                 sys.stdout.write('\repoch %i: training instance %d of %d (%f %%)\r' % (translation_model.epoch, count, block_size, 100. * count / block_size))
                 sys.stdout.flush()
 
-            a, b, rel = row
+            if args['train_words']:
+                # a, b should represent word indices, so we have to go from
+                # synsets to words
+                # get the synsets for each index
+                _, _, rel = row
+                synset_a, synset_b, _ = relationships.indices_to_symbolic(row)
+                # for each synset, get indices of words in the vocabulary
+                # associated with the synset
+                words_a = synset_to_words.words_by_synset[synset_a]
+                words_b = synset_to_words.words_by_synset[synset_b]
+                # if there aren't any for either, on to the next training
+                # example
+                if not words_a or not words_b:
+                    skip_count += 1
+                    continue
+                # otherwise, randomly choose one and train on it
+                a = data_rng.choice(words_a)
+                b = data_rng.choice(words_b)
+            else:
+                # a, b should represent synset indices
+                a, b, rel = row
+
             a_new, b_new, rel_new = a, b, rel
 
             # choose to corrupt one part of the triple
@@ -256,10 +289,10 @@ if __name__ == "__main__":
             # corrupt with some other part
             if to_mod == 0:
                 while a_new == a:
-                    a_new = data_rng.randint(N_synsets)
+                    a_new = data_rng.randint(vocab_size)
             elif to_mod == 1:
                 while b_new == b:
-                    b_new = data_rng.randint(N_synsets)
+                    b_new = data_rng.randint(vocab_size)
             elif to_mod == 2:
                 while rel_new == rel:
                     rel_new = data_rng.randint(N_relationships)

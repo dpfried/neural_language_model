@@ -6,7 +6,10 @@ from admm import ADMMModel, AnnealingADMMModel
 from joint import JointModel
 from utils import models_in_folder, line_styles
 from os.path import split, join
-from relational_admm import *
+from relational.relational_admm import *
+from relational.translational_admm import *
+from relational.translation import *
+
 
 # for backward compatability with unpickling models pickled with theano 0.5
 # when unpickling with 0.6
@@ -48,7 +51,7 @@ def make_series(model_root_folder,
             model = cPickle.load(f)
         this_stats = run_model(model, include_synsets, normalize_components, **run_model_args)
         stats = pandas.concat([stats, pandas.DataFrame([this_stats], index=[n])]).sort()
-    stats.to_pickle(store_fname)
+        stats.to_pickle(store_fname)
     return stats
 
 def run_model(model, include_synsets=None, normalize_components=False,

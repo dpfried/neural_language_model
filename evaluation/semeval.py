@@ -31,12 +31,12 @@ def get_paradigms(question_file):
         lines = list(islice(f, 4, 8))
         if not(lines[-1].strip()): # possibly only 3 golden examples
             lines = lines[:-1]
-        pairs = [line.lower().strip().split(':') for line in lines]
+        pairs = [line.strip().split(':') for line in lines]
     return pairs
 
 def get_examples(answer_file):
     with open(answer_file) as f:
-        return [line.lower().strip().strip('"').split(':') for line in f]
+        return [line.strip().strip('"').split(':') for line in f]
 
 def run(model, include_synsets, normalize_components, semeval_root):
     analogy_fn, choose_best = make_analogy_fns(model,

@@ -30,11 +30,11 @@ def cosine_similarity(a, b):
 
 def make_analogy_fns(model, include_synsets=None, normalize_components=False):
     def analogy_fn(word1, word2):
-        return model.get_embedding(word2, include_synsets, normalize_components) - \
-                model.get_embedding(word1, include_synsets, normalize_components)
+        return model.get_embedding(word2.lower(), include_synsets, normalize_components) - \
+                model.get_embedding(word1.lower(), include_synsets, normalize_components)
     def choose_best(reference_analogy, other_pairs):
         # reference_analogy = analogy_fn(word1, word2)
-        other_analogies = [analogy_fn(w1, w2) for (w1, w2) in other_pairs]
+        other_analogies = [analogy_fn(w1.lower(), w2.lower()) for (w1, w2) in other_pairs]
         scores = [cosine_similarity(reference_analogy, other) for other in other_analogies]
         return list(reversed(sorted(zip(scores, other_pairs))))
     return analogy_fn, choose_best

@@ -1,0 +1,16 @@
+word similarity:
+    38282/50000 words have pairwise similarities
+
+    some that don't:
+        <punctuation>, of, to, and, with, we, what, if, their, would, him, she, her, them, when, upon, during
+        years and numbers [many of these], foreign words, abbreviations, genitive (student's)
+
+wordnet relationships
+    22417/50000 words appear in wordnet relationships
+
+    many function words
+
+    of the missing words 11718 / 27853 don't appear in any synsets
+
+    is it was as not by had been an but or were has who me most its also between us did states before york am does never seen too came american children went called always within yet shown mr told again ever women took asked members cases once got
+    seems al soon knew often brought results greater already quite looked though held de london almost english england rather rights seemed british having co america either around feet months doing began problems really countries non carried patients along changes gave studies perhaps became therefore follows french needs ed passed probably

@@ -15,18 +15,8 @@ from relational.ntn import NeuralTensorNetwork, TensorLayer
 from relational.wordnet_rels import Relationships
 from admm import ADMMModel
 import time
-from nltk.corpus import wordnet as wn
 import fix_imports
-
-class SynsetToWord(object):
-    def __init__(self, vocabulary):
-        vocab = dict((word, index)
-                     for index, word in enumerate(vocabulary))
-        self.words_by_synset = dict(
-            (synset, [vocab[lemma.name] for lemma in synset.lemmas
-                      if lemma.name in vocab])
-            for synset in wn.all_synsets()
-        )
+from synset_to_word import SynsetToWord
 
 class RelationalADMMModel(ADMMModel):
     def _get_vocabulary(self):

@@ -5,6 +5,10 @@ import glob
 import os
 import itertools
 
+def map_dict(fn, d):
+    return { key: fn(value)
+            for key, value in d.iteritems() }
+
 def sample_cumulative_discrete_distribution(cumulative_dist, rng=None):
     """
     cumulative_dist should be a increasing list of positive values,
@@ -41,3 +45,8 @@ def line_styles(number_of_lines):
         return itertools.imap(lambda strs: ''.join(strs), itertools.cycle(itertools.product(colors, lines)))
     else:
         return colors
+
+def compose(*fns):
+    def composetwo(f, g):
+        return lambda x: f(g(x))
+    return reduce(composetwo, fns)

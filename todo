@@ -1,0 +1,8 @@
+evaluation
+---
+Jenatton - high dimensional relational learning (NIPS, 2012: https://www.hds.utc.fr/everest/doku.php?id=en:lfmnips12) evaluates on Verb similarity from Yang and Powers, 2006. that data is available here:
+http://david.wardpowers.info/Research/AI/papers/200601-GWC-130verbpairs.txt
+
+coding
+---
+normalization of vector embeddings

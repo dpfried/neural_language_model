@@ -11,6 +11,7 @@ from semantic_network import *
 from model import _default_word
 from admm import *
 from joint import *
+import re
 
 def attr_dict(filename):
     with open(filename) as f:
@@ -28,10 +29,8 @@ def parse_accuracy(filename):
 def get_paradigms(question_file):
     from itertools import islice
     with open(question_file) as f:
-        lines = list(islice(f, 4, 8))
-        if not(lines[-1].strip()): # possibly only 3 golden examples
-            lines = lines[:-1]
-        pairs = [line.strip().split(':') for line in lines]
+        paradigm_string = re.search('Consider the following word pairs:(.*)What relation best describes', f.read(), re.DOTALL).groups()[0]
+        return re.findall('(\w*):(\w*)', paradigm_string)
     return pairs
 
 def get_examples(answer_file):
@@ -71,8 +70,8 @@ def run(model, include_synsets, normalize_components, semeval_root):
     for semeval_data_folder, sets_to_run in sets_by_folder.items():
         # only test on testing
         for s in sets_to_run:
-            print '-------'
-            print s
+            # print '-------'
+            # print s
 
             answer_file = os.path.join(semeval_data_folder, 'Phase1Answers', 'Phase1Answers-%s.txt' % s)
             question_file = os.path.join(semeval_data_folder, 'Phase1Questions', 'Phase1Questions-%s.txt' % s)

@@ -5,7 +5,7 @@ import theano
 import os
 import gzip, cPickle
 from relational.wordnet_rels import Relationships
-from relational.relational_admm import SynsetToWord
+from relational.synset_to_word import SynsetToWord
 from utils import models_in_folder
 import pandas
 import json

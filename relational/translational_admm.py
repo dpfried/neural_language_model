@@ -13,7 +13,8 @@ import random
 from os.path import join
 from relational.translation import TranslationNetwork
 from relational.wordnet_rels import Relationships
-from relational.relational_admm import SynsetToWord, validate_syntactic
+from relational.relational_admm import  validate_syntactic
+from relational.synset_to_word import SynsetToWord
 from admm import ADMMModel
 import time
 

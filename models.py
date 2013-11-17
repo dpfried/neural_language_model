@@ -68,13 +68,13 @@ class VectorEmbeddings(object):
 
 class EmbeddingLayer(Picklable, VectorEmbeddings):
     def _nonshared_attrs(self):
-        return ['embedding']
-
-    def _shared_attrs(self):
         return [('mode', 'FAST_RUN'),
                 'vocab_size',
                 'dimensions',
                 ]
+
+    def _shared_attrs(self):
+        return ['embedding']
 
     def _initialize(self):
         self.params = []
@@ -153,7 +153,7 @@ class LinearScalarResponse(Picklable):
     def __call__(self, x):
         return T.dot(x, self.W) + self.b
 
-    def update(self, cost, learning_rate):
+    def updates(self, cost, learning_rate):
         dW, db = T.grad(cost, [self.W, self.b])
         return [(self.W, self.W - learning_rate * dW),
                 (self.b, self.b - learning_rate * db)]
@@ -220,9 +220,6 @@ class HiddenLayer(Picklable):
         self._set_attrs(W=W_values, b=b_values, activation=activation)
         self._initialize()
 
-    def _initialize(self):
-        self.params = [self.W, self.b]
-
     def __call__(self, x):
         return self.activation(T.dot(x, self.W) + self.b)
 
@@ -249,7 +246,8 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
 
     def _initialize(self):
         self.params =  self.hidden_layer.params + self.output_layer.params
-        self._make_functions()
+        self.train = self._make_training()
+        self.score = self._make_scoring()
 
     @property
     def embeddings(self):
@@ -295,12 +293,12 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         and return the score and the list of embeddings
         The list of embeddings is returned for use in differentiation
         """
-        embeddings = [embedding_layer(index) for index in index_list]
+        embeddings = [self.embedding_layer(index) for index in index_list]
         embedded_sequence = T.concatenate(embeddings)
-        return output_layer(hidden_layer(embedded_sequence)), embeddings
+        return self.output_layer(self.hidden_layer(embedded_sequence)), embeddings
 
     def updates(self, cost, index_list, embedding_list, learning_rate):
-        return self.embedding_layer.updates(cost, indices, embeddings, learning_rate)\
+        return self.embedding_layer.updates(cost, index_list, embedding_list, learning_rate)\
                 + self.hidden_layer.updates(cost, learning_rate)\
                 + self.output_layer.updates(cost, learning_rate)
 
@@ -338,12 +336,3 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         indices = self._index_variables('index')
         score, embeddings = self(indices)
         return theano.function(inputs=indices, outputs=score, mode=self.mode)
-
-    def make_functions(self):
-        # create symbolic variables for correct and error input
-        self.layer_stack = [self.hidden_layer, self.output_layer]
-
-        self.params = self.get_params()
-
-        self.train = self._make_training()
-        self.score = self._make_testing()

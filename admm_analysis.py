@@ -20,9 +20,6 @@ def load_models(base_path='/cl/work/dfried/models/relational/translational_admm_
     return { index: load_model(path) for index, path in model_paths.iteritems()
             if index in indices }
 
-def norms(E):
-    return (E * E).sum(1)
-
 def residuals(model):
     return model.syntactic_embedding - model.semantic_embedding
 
@@ -65,6 +62,9 @@ def plot(arrs, indices=None, **kwargs):
         except:
             pass
         plt.title(num)
+
+def norms(E):
+    return np.sqrt(np.sum(E**2, axis=1))
 
 if __name__ == "__main__":
     rels = Relationships()

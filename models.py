@@ -9,7 +9,7 @@ def column(vector):
     """
     return T.addbroadcast(T.stack(vector).T, 1)
 
-ADAGRAD_EPSILON = 1e-6
+ADAGRAD_EPSILON = 1e-6 # prevent numerical errors if gradient is 0
 
 class Picklable(object):
     def _nonshared_attrs(self):
@@ -131,7 +131,11 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
         self._initialize()
 
     def __call__(self, index):
-        return self.embedding[index]
+        if type(index) is list:
+            indices = T.stack(*index)
+            return self.embedding[indices]
+        else:
+            return self.embedding[index]
 
     def updates(self, cost, index_list, embedding_list):
         # cost: a symbolic cost function
@@ -173,7 +177,7 @@ class LinearScalarResponse(Picklable):
 
         # init the basis as a scalar, 0
         b_values = np.cast[theano.config.floatX](0.0)
-        db_ss = np.cast[theano.config.floatX](1.0) * ADAGRAD_EPSILON
+        db_ss = np.cast[theano.config.floatX](ADAGRAD_EPSILON)
 
         learning_rate = np.cast[theano.config.floatX](learning_rate)
 
@@ -266,7 +270,7 @@ class HiddenLayer(Picklable):
             db_ss = np.ones_like(b_values, dtype=theano.config.floatX) * ADAGRAD_EPSILON
         else:
             b_values = np.cast[theano.config.floatX](0.0)
-            db_ss = np.cast[theano.config.floatX](1.0) * ADAGRAD_EPSILON
+            db_ss = np.cast[theano.config.floatX](ADAGRAD_EPSILON)
 
         learning_rate = np.cast[theano.config.floatX](learning_rate)
 
@@ -300,6 +304,160 @@ class HiddenLayer(Picklable):
             (self.dW_sum_squares, dW_ss),
             (self.db_sum_squares, db_ss),
         ]
+
+
+class ScaledBilinear(Picklable):
+    def _nonshared_attrs(self):
+        return [
+            ('mode', 'FAST_RUN'),
+            'adagrad',
+        ]
+
+    def _shared_attrs(self):
+        return [
+            'learning_rate',
+            'w',
+            'b',
+            'dw_sum_squares',
+            'db_sum_squares',
+        ]
+
+    def _initialize(self):
+        self.params = [self.w, self.b]
+
+    def __init__(self, adagrad=False, learning_rate=0.01):
+        w = np.cast[theano.config.floatX](0.0)
+        dw_ss = np.cast[theano.config.floatX](ADAGRAD_EPSILON)
+        b = np.cast[theano.config.floatX](0.0)
+        db_ss = np.cast[theano.config.floatX](ADAGRAD_EPSILON)
+
+        learning_rate = np.cast[theano.config.floatX](learning_rate)
+
+        self._set_attrs(w=w,
+                        b=b,
+                        adagrad=adagrad,
+                        learning_rate=learning_rate,
+                        dw_sum_squares=dw_ss,
+                        db_sum_squares=db_ss)
+        self._initialize()
+
+    def __call__(self, x, y):
+        pass
+
+    def updates(self, cost):
+        dw, db = T.grad(cost, [self.w, self.b])
+        dw_ss = self.dw_sum_squares + dw**2
+        db_ss = self.db_sum_squares + db**2
+        if self.adagrad:
+            dw_weight = self.learning_rate / T.sqrt(dw_ss)
+            db_weight = self.learning_rate / T.sqrt(db_ss)
+        else:
+            dw_weight = self.learning_rate
+            db_weight = self.learning_rate
+        return [
+            (self.w, self.w - dw_weight * dw),
+            (self.b, self.b - db_weight * db),
+            (self.dw_sum_squares, dw_ss),
+            (self.db_sum_squares, db_ss),
+        ]
+
+class CosineSimilarity(ScaledBilinear):
+    def __call__(self, x, y):
+        cos_distance = T.sum(x * y, -1) / T.sqrt(T.sum(x * x, -1) * T.sum(y * y, -1))
+        return cos_distance * self.w + self.b
+
+class EuclideanDistance(ScaledBilinear):
+    def __call__(self, x, y):
+        res = x - y
+        return T.sqrt(T.sum(res ** 2, -1)) * self.w + self.b
+
+class SimilarityNN(Picklable, VectorEmbeddings):
+    def _nonshared_attrs(self):
+        return ['other_params',
+                ('mode', 'FAST_RUN'),
+                'embedding_layer',
+                'similarity_layer',
+                'dimensions',
+                'vocab_size']
+
+    def _shared_attrs(self):
+        return []
+
+    def _initialize(self):
+        self.params =  self.similarity_layer.params
+        self.train = self._make_training()
+        self.score = self._make_scoring()
+
+    @property
+    def embeddings(self):
+        return self.embedding_layer.embeddings
+
+    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, adagrad=True, similarity_klass=CosineSimilarity):
+        # initialize parameters
+        if other_params is None:
+            other_params = {}
+
+        embedding_layer = EmbeddingLayer(rng,
+                                         vocab_size=vocab_size,
+                                         dimensions=dimensions,
+                                         initial_embeddings=initial_embeddings,
+                                         learning_rate=learning_rate,
+                                         adagrad=adagrad)
+
+        similarity_layer = similarity_klass(learning_rate=learning_rate,
+                                      adagrad=adagrad)
+
+        self._set_attrs(other_params=other_params,
+                        mode=mode,
+                        embedding_layer=embedding_layer,
+                        similarity_layer=similarity_layer,
+                        dimensions=dimensions,
+                        vocab_size=vocab_size)
+        self._initialize()
+
+
+    def __call__(self, index_a, index_b):
+        """
+        embed the given indices, run the embeddings through the network,
+        and return the score (distance) and the list of embeddings
+        The list of embeddings is returned for use in differentiation
+        """
+        embedding_a = self.embedding_layer(index_a)
+        embedding_b = self.embedding_layer(index_b)
+        return self.similarity_layer(embedding_a, embedding_b), embedding_a, embedding_b
+
+    def updates(self, cost, index_list, embedding_list):
+        return self.embedding_layer.updates(cost, index_list, embedding_list)\
+                + self.similarity_layer.updates(cost)
+
+    def cost(self, index_a, index_b, true_similarity):
+        score, embedding_a, embedding_b = self(index_a, index_b)
+        cost = (score - true_similarity) ** 2
+        return cost, [index_a, index_b], [embedding_a, embedding_b]
+
+    def _index_variable(self, name='index'):
+        return T.lscalar(name)
+
+    def _make_training(self, cost_addition=None):
+        index_a = self._index_variable('index_a')
+        index_b = self._index_variable('index_b')
+        similarity = T.scalar('true_similarity')
+
+        cost, indices, embeddings = self.cost(index_a, index_b, similarity)
+        if cost_addition:
+            cost += cost_addition(indices, embeddings)
+        updates = self.updates(cost,
+                               indices,
+                               embeddings)
+
+        return theano.function(inputs=[index_a, index_b, similarity], outputs=cost, updates=updates, mode=self.mode)
+
+    def _make_scoring(self):
+        index_a = self._index_variable('index_a')
+        index_b = self._index_variable('index_b')
+        score, embedding_a, embedding_b = self(index_a, index_b)
+        return theano.function(inputs=[index_a, index_b], outputs=score, mode=self.mode)
+
 
 class SequenceScoringNN(Picklable, VectorEmbeddings):
     def _nonshared_attrs(self):
@@ -382,13 +540,13 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         correct_score, correct_embeddings = self(correct_index_list)
         error_score, error_embeddings = self(error_index_list)
         cost = T.clip(1 - correct_score + error_score, 0, np.inf)
-        return cost, correct_embeddings, error_embeddings
+        return cost, correct_index_list + error_index_list, correct_embeddings + error_embeddings
 
     def _index_variables(self, basename='index'):
         return T.lscalars(*['%s_%d' % (basename, i)
                             for i in xrange(self.sequence_length)])
 
-    def _make_training(self):
+    def _make_training(self, cost_addition=None):
         """
         compile and return symbolic theano function for training (including update of embedding and weights),
         The compiled function will take two vectors of ints, each of length
@@ -398,10 +556,12 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         correct_indices = self._index_variables('correct')
         error_indices = self._index_variables('error')
 
-        cost, correct_embeddings, error_embeddings = self.cost(correct_indices, error_indices)
+        cost, indices, embeddings = self.cost(correct_indices, error_indices)
+        if cost_addition:
+            cost += cost_addition(indices, embeddings)
         updates = self.updates(cost,
-                               correct_indices + error_indices,
-                               correct_embeddings + error_embeddings)
+                               indices,
+                               embeddings)
 
         inputs = correct_indices + error_indices
         outputs = cost
@@ -411,3 +571,83 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         indices = self._index_variables('index')
         score, embeddings = self(indices)
         return theano.function(inputs=indices, outputs=score, mode=self.mode)
+
+class ADMM(Picklable):
+    def _admm_cost(self, side='w'):
+        if side == 'w':
+            other_model = self.v_trainer
+        elif side == 'v':
+            other_model = self.w_trainer
+        else:
+            raise ValueError('bad side value %s' % side)
+        def admm_cost(indices, this_model_embeddings):
+            other_model_embeddings = other_model.embedding_layer(indices)
+            index_vector = T.stack(*indices)
+
+            indicator = column(self.intersection_indicator[index_vector])
+
+            y = self.y[index_vector] * indicator
+
+            if side == 'w':
+                res = (this_model_embeddings - other_model_embeddings) * indicator
+            else:
+                res = (other_model_embeddings - this_model_embeddings) * indicator
+
+            return T.sum(y * res) + self.rho / 2.0 * T.sum(res * res)
+        return admm_cost
+
+    def _shared_attrs(self):
+        return ['y', 'intersection_indicator']
+
+    def _nonshared_attrs(self):
+        return ['w_trainer',
+                'v_trainer',
+                'indices_in_intersection',
+                'other_params',
+                'rho',
+                ('mode', 'FAST_RUN'),
+                'k']
+
+    def __init__(self, w_trainer, v_trainer, vocab_size, indices_in_intersection, dimensions, rho, other_params=None, mode='FAST_RUN'):
+        # the lagrangian
+        y = np.zeros((vocab_size, dimensions), dtype=theano.config.floatX)
+
+        intersection_indicator = np.zeros(vocab_size, dtype=np.int8)
+        intersection_indicator[list(indices_in_intersection)] = 1
+
+        if not other_params:
+            other_params = {}
+
+        self._set_attrs(w_trainer=w_trainer,
+                        v_trainer=v_trainer,
+                        rho=rho,
+                        other_params=other_params,
+                        intersection_indicator=intersection_indicator,
+                        indices_in_intersection=list(indices_in_intersection),
+                        mode=mode,
+                        y=y,
+                        k=0)
+        self._initialize()
+
+    def _initialize(self):
+        self.update_w = self.w_trainer._make_training(cost_addition=self._admm_cost('w'))
+        self.update_v = self.v_trainer._make_training(cost_addition=self._admm_cost('v'))
+        self.update_y = self._make_y_update()
+
+    def _make_y_update(self):
+        w = self.w_trainer.embedding_layer.embedding
+        v = self.v_trainer.embedding_layer.embedding
+        res = (w - v)[self.indices_in_intersection]
+        y = self.y[self.indices_in_intersection]
+        updates = [(self.y, T.inc_subtensor(y, self.rho * res))]
+
+        res_norm_mean = T.mean(T.sqrt(T.sum(res**2, 1)))
+        y_norm_mean = T.mean(T.sqrt(T.sum(y**2, 1)))
+
+        return theano.function(inputs=[],
+                               outputs=[res_norm_mean, y_norm_mean],
+                               updates=updates,
+                               mode=self.mode)
+
+    def increase_k(self):
+        self.k += 1

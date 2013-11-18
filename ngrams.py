@@ -110,11 +110,5 @@ class NgramReader(object):
         correct_symbols = row[:-2]
         ngram_frequency = row[-2]
         # get a list of symbols representing a corrupted ngram
-        # TODO: maybe move add_noise_to_symbols from ngram_reader to this file?
         error_symbols = self.add_noise_to_symbols(correct_symbols, column_index=replacement_column_index, rng=rng)
         return correct_symbols, error_symbols, ngram_frequency
-
-
-
-class PosNgramReader(NgramReader):
-    pass

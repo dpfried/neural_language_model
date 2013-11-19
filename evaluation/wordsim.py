@@ -1,15 +1,17 @@
 import csv
 from scipy.spatial.distance import cosine
 import gzip, cPickle
-from semantic_network import *
 from model import _default_word
+# from semantic_network import *
+# from admm import *
+from query import get_vocab_container
 
 from scipy.stats import spearmanr
-from admm import *
 
-def run(model, include_synsets, normalize_components, wordsim_root):
+def run(model, vocab_container, wordsim_root):
     def get_embedding(word):
-        return model.get_embedding(word, include_synsets=include_synsets, normalize_components=normalize_components)
+        return model.embeddings[vocab_container.symbol_to_index[word]]
+        # return model.get_embedding(word, include_synsets=include_synsets, normalize_components=normalize_components)
 
     with open(wordsim_root) as csvfile:
         # discard headr
@@ -38,13 +40,8 @@ if __name__ == "__main__":
     with gzip.open(args.model) as f:
         model = cPickle.load(f)
 
-    if args.all_synsets:
-        include_synsets='all'
-    elif args.top_synset:
-        include_synsets='top'
-    else:
-        include_synsets=None
+    vocab_container = get_vocab_container(model)
 
-    rho, p = run(model, include_synsets, args.normalize_components, args.wordsim_root)
+    rho, p = run(model, vocab_container, args.wordsim_root)
 
     print 'rho: %f\tp: %f' % (rho, p)

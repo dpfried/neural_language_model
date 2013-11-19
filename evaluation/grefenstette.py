@@ -1,10 +1,10 @@
-import numpy as np
 from scipy.spatial.distance import cosine
 import gzip, cPickle
 from scipy.stats import spearmanr
-from semantic_network import *
 from model import _default_word
+from semantic_network import *
 from admm import *
+from query import get_vocab_container
 
 def parse_line(line):
     tokens = line.lower().strip().split()
@@ -24,11 +24,12 @@ def make_verb_applicability_fn(get_embedding_fn):
                           verb_applicability(verb2, noun1, noun2))
     return verb_applicability, compare_verbs
 
-def run(model, include_synsets, normalize_components, verb_file):
+def run(model, vocab_container, verb_file):
     parsed_lines = parse_file(verb_file)
 
     def get_embedding(word):
-        return model.get_embedding(word, include_synsets=include_synsets, normalize_components=normalize_components)
+        index = vocab_container.symbol_to_index[word]
+        return model.embeddings[index]
 
     verb_applicability, compare_verbs = make_verb_applicability_fn(get_embedding)
 
@@ -51,22 +52,13 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('model_file')
-    parser.add_argument('--all_synsets', action='store_true',)
-    parser.add_argument('--top_synset', action='store_true',)
-    parser.add_argument('--normalize_components', action='store_true',)
     parser.add_argument('--verb_file', default='/home/dfried/code/verb_disambiguation')
     args = parser.parse_args()
 
     with gzip.open(args.model_file) as f:
         model = cPickle.load(f)
+    vocab_container = get_vocab_container(model)
 
-    if args.all_synsets:
-        include_synsets='all'
-    elif args.top_synset:
-        include_synsets='top'
-    else:
-        include_synsets=None
-
-    rho, p = run(model, include_synsets, args.normalize_components, args.verb_file)
+    rho, p = run(model, vocab_container, args.verb_file)
 
     print 'rho: %f\tp: %f' % (rho, p)

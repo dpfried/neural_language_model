@@ -202,7 +202,7 @@ class EmbeddingLayer(EZPickle):
     def most_similar_embeddings(self, index, metric='cosine', top_n=10, **kwargs):
         embeddings = self.embedding.get_value()
         this_embedding = embeddings[index]
-        return self.most_similar_to(this_embedding, metric=metrics,top_n=top_n, **kwargs)
+        return self.most_similar_to(this_embedding, metric=metric,top_n=top_n, **kwargs)
 
 class LinearScalarResponse(EZPickle):
     SHARED = ['W', 'b']

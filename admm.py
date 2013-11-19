@@ -81,6 +81,17 @@ class ADMMModel(EZPickle):
     def semantic_embedding(self):
         return self.semantic_model.get_embeddings()
 
+    @property
+    def embeddings(self):
+        include_syntactic = not ('dont_run_syntactic' in self.other_params and self.other_params['dont_run_syntactic'])
+        include_semantic = not ('dont_run_semantic' in self.other_params and self.other_params['dont_run_semantic'])
+        if include_syntactic and include_semantic:
+            return np.concatenate((self.syntactic_embedding, self.semantic_embedding), 1)
+        elif include_syntactic:
+            return self.syntactic_embedding
+        else:
+            return self.semantic_embedding
+
     def embeddings_and_y_symbolic(self, correct_indices, error_indices):
         all_indices = T.concatenate([correct_indices, error_indices])
 

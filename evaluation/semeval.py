@@ -3,14 +3,13 @@ import subprocess
 import os
 from glob import glob
 import numpy as np
-import sys
-from query import load_model_and_ngrams,  make_analogy_fns
+from query import  make_analogy_fns, get_vocab_container
 import gzip, cPickle
 import tempfile
-from semantic_network import *
 from model import _default_word
+# from semantic_network import *
 from admm import *
-from joint import *
+# from joint import *
 import re
 
 def attr_dict(filename):
@@ -27,20 +26,18 @@ def parse_accuracy(filename):
     return float(attrs['Overall Accuracy'].strip('%')) / 100.
 
 def get_paradigms(question_file):
-    from itertools import islice
     with open(question_file) as f:
         paradigm_string = re.search('Consider the following word pairs:(.*)What relation best describes', f.read(), re.DOTALL).groups()[0]
         return re.findall('(\w*):(\w*)', paradigm_string)
-    return pairs
 
 def get_examples(answer_file):
     with open(answer_file) as f:
         return [line.strip().strip('"').split(':') for line in f]
 
-def run(model, include_synsets, normalize_components, semeval_root):
+def run(model, vocab_container,  semeval_root):
     analogy_fn, choose_best = make_analogy_fns(model,
-                                               include_synsets=include_synsets,
-                                               normalize_components=normalize_components)
+                                               vocab_container,
+                                               )
 
     output_folder = tempfile.mkdtemp()
 
@@ -125,9 +122,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('model', help="model file to be used for semeval.py script")
-    parser.add_argument('--all_synsets', action='store_true',)
-    parser.add_argument('--top_synset', action='store_true',)
-    parser.add_argument('--normalize_components', action='store_true',)
     # parser.add_argument('--output_folder', help="folder to write results to", default="/home/dfried/code/nlm/semeval/junk")
     parser.add_argument('--semeval_root', help="folder containing semeval data", default="/home/dfried/code/semeval")
     args = parser.parse_args()
@@ -135,14 +129,9 @@ if __name__ == "__main__":
     with gzip.open(args.model) as f:
         model = cPickle.load(f)
 
-    if args.all_synsets:
-        include_synsets='all'
-    elif args.top_synset:
-        include_synsets='top'
-    else:
-        include_synsets=None
+    vocab_container = get_vocab_container(model)
 
-    mean_cor, mean_acc = run(model, include_synsets, args.normalize_components, args.semeval_root)
+    mean_cor, mean_acc = run(model, vocab_container, args.semeval_root)
 
     print 'average correlation: %f' % mean_cor
     print 'average accuracy: %f' % mean_acc

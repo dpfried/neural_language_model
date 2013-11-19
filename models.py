@@ -637,9 +637,14 @@ class ADMM(Picklable):
     def _make_y_update(self):
         w = self.w_trainer.embedding_layer.embedding
         v = self.v_trainer.embedding_layer.embedding
-        res = (w - v)[self.indices_in_intersection]
-        y = self.y[self.indices_in_intersection]
-        updates = [(self.y, T.inc_subtensor(y, self.rho * res))]
+        if self.indices_in_intersection:
+            res = (w - v)[self.indices_in_intersection]
+            y = self.y[self.indices_in_intersection]
+            updates = [(self.y, T.inc_subtensor(y, self.rho * res))]
+        else:
+            res = w - v
+            y = self.y
+            updates = [(self.y, self.y + self.rho * res)]
 
         res_norm_mean = T.mean(T.sqrt(T.sum(res**2, 1)))
         y_norm_mean = T.mean(T.sqrt(T.sum(y**2, 1)))
@@ -648,6 +653,17 @@ class ADMM(Picklable):
                                outputs=[res_norm_mean, y_norm_mean],
                                updates=updates,
                                mode=self.mode)
+
+    @property
+    def embeddings(self):
+        include_syntactic = not ('dont_run_syntactic' in self.other_params and self.other_params['dont_run_syntactic'])
+        include_semantic = not ('dont_run_semantic' in self.other_params and self.other_params['dont_run_semantic'])
+        if include_syntactic and include_semantic:
+            return np.concatenate((self.w_trainer.embeddings, self.v_trainer.embeddings), 1)
+        elif include_syntactic:
+            return self.w_trainer.embeddings
+        else:
+            return self.v_trainer.embeddings
 
     def increase_k(self):
         self.k += 1

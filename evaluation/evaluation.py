@@ -1,3 +1,4 @@
+import theano
 import grefenstette, semeval, wordsim
 import gzip, cPickle
 import pandas
@@ -8,6 +9,7 @@ from joint import JointModel
 from utils import models_in_folder, line_styles
 from os.path import join
 import os
+from query import get_vocab_container
 
 # for backward compatability with unpickling models pickled with theano 0.5
 # when unpickling with 0.6
@@ -15,12 +17,12 @@ theano.tensor.basic.Subtensor = theano.tensor.Subtensor
 theano.config.on_unused_input = 'warn'
 
 def make_series(model_root_folder,
-                include_synsets=None,
-                normalize_components=False,
                 plot_interval=100,
                 limit=None,
                 no_new=False,
                 **run_model_args):
+    include_synsets = None
+    normalize_components=False
     store_fname = join(model_root_folder, 'eval-%s-%s.pkl' % (include_synsets, normalize_components))
     try:
         stats = pandas.read_pickle(store_fname)
@@ -40,6 +42,7 @@ def make_series(model_root_folder,
         to_plot = [1] + to_plot
     if limit is not None:
         to_plot = [n for n in to_plot if n <= limit]
+    vocab_container = None
     print model_root_folder
     for n in to_plot:
         if n in stats.index:
@@ -47,31 +50,31 @@ def make_series(model_root_folder,
             continue
         with gzip.open(models[n]) as f:
             model = cPickle.load(f)
-        this_stats = run_model(model, include_synsets, normalize_components, **run_model_args)
+        # load the vocabulary if not already cached
+        if not vocab_container:
+            vocab_container = get_vocab_container(model)
+        this_stats = run_model(model, vocab_container,  **run_model_args)
         stats = pandas.concat([stats, pandas.DataFrame([this_stats], index=[n])]).sort()
-    stats.to_pickle(store_fname)
+        stats.to_pickle(store_fname)
     return stats
 
-def run_model(model, include_synsets=None, normalize_components=False,
+def run_model(model, vocab_container,
               grefenstette_verb_file='/home/dfried/code/verb_disambiguation',
               semeval_root="/home/dfried/code/semeval",
               wordsim_root="/home/dfried/data/wordsim/combined.csv",
               **kwargs):
     stats = {}
     stats['grefenstette_rho'], _ = grefenstette.run(model,
-                                                    include_synsets,
-                                                    normalize_components,
+                                                    vocab_container,
                                                     grefenstette_verb_file)
 
     stats['semeval_correlation'], stats['semeval_accuracy'] \
             = semeval.run(model,
-                          include_synsets,
-                          normalize_components,
+                          vocab_container,
                           semeval_root)
 
     stats['wordsim_rho'], _ = wordsim.run(model,
-                                          include_synsets,
-                                          normalize_components,
+                                          vocab_container,
                                           wordsim_root)
 
     return stats
@@ -82,10 +85,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model_directories', nargs='+')
     parser.add_argument('--plot_interval', type=int, default=100)
-    parser.add_argument('--all_synsets', action='store_true',)
-    parser.add_argument('--top_synset', action='store_true',)
-    parser.add_argument('--normalize_components', action='store_true')
-
     parser.add_argument('--grefenstette_verb_file', default='/home/dfried/code/verb_disambiguation')
 
     # parser.add_argument('--semeval_output_folder', help="folder to write results to", default="/home/dfried/code/nlm/semeval/junk")
@@ -98,15 +97,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_graphs_base')
     args = parser.parse_args()
 
-    if args.all_synsets:
-        include_synsets='all'
-    elif args.top_synset:
-        include_synsets='top'
-    else:
-        include_synsets=None
-
     all_stats = dict((model_directory, make_series(model_directory,
-                                                   include_synsets=include_synsets,
                                                    **vars(args)))
                      for model_directory in args.model_directories)
 

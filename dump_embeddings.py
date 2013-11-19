@@ -1,4 +1,4 @@
-from query import load_model_and_ngrams
+import cPickle, gzip
 from admm import *
 from model import *
 from semantic_network import *
@@ -12,9 +12,7 @@ if __name__ == "__main__":
     parser.add_argument('dump_filename', help='filename to dump the embeddings to')
     args = parser.parse_args()
 
-    model, ngram_reader = load_model_and_ngrams(args.model)
-
-    with gzip.open(args.model, 'rb') as f:
+    with gzip.open(args.model) as f:
         model = cPickle.load(f)
 
     model.dump_embeddings(args.dump_filename)

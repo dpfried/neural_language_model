@@ -4,6 +4,7 @@ import numpy as np
 from collections import defaultdict
 
 from utils import sample_cumulative_discrete_distribution
+UNKNOWN_WORD = '*UNKNOWN*'
 
 class NgramReader(object):
     def __init__(self, filename, ngram_length=5, vocab_size=None, train_proportion=0.95, test_proportion=None):
@@ -20,6 +21,7 @@ class NgramReader(object):
         else:
             self.word_array = self.hd5_file['words']
             self.word_frequencies = self.hd5_file['word_frequencies']
+        self.word_array[0] = UNKNOWN_WORD
 
         self.cumulative_word_frequencies = np.cumsum(self.word_frequencies)
         self.ngrams = self.hd5_file['%i_grams' % ngram_length]
@@ -31,7 +33,10 @@ class NgramReader(object):
 
         # build a dictionary of words to indices for the top {vocab_size} words
         # in the dataset
-        self.id_map = defaultdict(int, dict((word, index) for index, word in enumerate(self.word_array)))
+        self.symbol_to_index = defaultdict(int,
+                                           dict((word, index) for index, word in enumerate(self.word_array)))
+        self.index_to_symbol = defaultdict(lambda : UNKNOWN_WORD,
+                                           dict((index, word) for index, word in enumerate(self.word_array)))
 
     def process_block(self, ngram_matrix):
         """

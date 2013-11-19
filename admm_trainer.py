@@ -225,6 +225,7 @@ if __name__ == "__main__":
 
         if not args['dont_run_syntactic']:
             # syntactic update step
+            augmented_costs = []
             costs = []
             for block_num in xrange(args['syntactic_blocks_to_run']):
                 training_block = ngram_reader.training_block(data_rng.random_sample())
@@ -235,7 +236,8 @@ if __name__ == "__main__":
                         sys.stdout.flush()
                     train_index = sample_cumulative_discrete_distribution(training_block[:,-1], rng=data_rng)
                     correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], rng=data_rng)
-                    cost = model.update_w(*(list(correct_symbols) + list(error_symbols)))
+                    augmented_cost, cost = model.update_w(*(list(correct_symbols) + list(error_symbols)))
+                    augmented_costs.append(augmented_cost)
                     costs.append(cost)
                 if args['syntactic_blocks_to_run'] > 1:
                     print
@@ -247,6 +249,10 @@ if __name__ == "__main__":
             print 'training:'
             print 'syntactic mean cost \t%f' % stats_for_k['syntactic_mean']
             print 'syntactic std cost \t%f' % stats_for_k['syntactic_std']
+            stats_for_k['semantic_mean_augmented'] = np.mean(augmented_costs)
+            stats_for_k['semantic_std_augmented'] = np.std(augmented_costs)
+            print 'semantic mean augmented cost \t%f' % stats_for_k['semantic_mean_augmented']
+            print 'semantic std augmented cost \t%f' % stats_for_k['semantic_std_augmented']
 
             # syntactic validation
             syn_validation_mean, syn_validation_weighted_mean = validate_syntactic(model, testing_block, ngram_reader, validation_rng)
@@ -262,6 +268,7 @@ if __name__ == "__main__":
         # semantic update step
         if not args['dont_run_semantic']:
             this_count = 0
+            augmented_costs = []
             costs = []
             for block_num in xrange(args['semantic_blocks_to_run']):
                 for i in xrange(args['semantic_block_size']):
@@ -275,8 +282,9 @@ if __name__ == "__main__":
                         if word_similarity.word_pairwise_sims[train_i, train_j] == -np.inf:
                             continue
                         sim = word_similarity.word_pairwise_sims[train_i, train_j]
-                        cost = model.update_v(train_i, train_j, sim)
-                    costs.append(cost)
+                        augmented_cost, cost = model.update_v(train_i, train_j, sim)
+                        augmented_costs.append(augmented_cost)
+                        costs.append(cost)
 
                     if i % print_freq == 0:
                         sys.stdout.write('\r k %i: pair : %d / %d' % (model.k, i, args['semantic_block_size']))
@@ -290,6 +298,10 @@ if __name__ == "__main__":
             stats_for_k['semantic_std'] = np.std(costs)
             print 'semantic mean cost \t%f' % stats_for_k['semantic_mean']
             print 'semantic std cost \t%f' % stats_for_k['semantic_std']
+            stats_for_k['semantic_mean_augmented'] = np.mean(augmented_costs)
+            stats_for_k['semantic_std_augmented'] = np.std(augmented_costs)
+            print 'semantic mean augmented cost \t%f' % stats_for_k['semantic_mean_augmented']
+            print 'semantic std augmented cost \t%f' % stats_for_k['semantic_std_augmented']
 
             # semantic validation
             semantic_mean_jaccard = validate_semantic(model, args['sem_validation_num_to_test'], args['sem_validation_num_nearest'], word_similarity, validation_rng)

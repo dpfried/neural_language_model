@@ -35,20 +35,26 @@ class Picklable(object):
             else:
                 name, default = param, None
             try:
+                if name not in kwargs:
+                    print 'warning: %s not found, setting to default %s' % (name, default)
                 setattr(self, name, theano.shared(kwargs.get(name, default), name=name))
             except TypeError as e: # in case we stored the shared variable, get its current value
                 print e
+                if name not in kwargs:
+                    print 'warning: %s not found, setting to default %s' % (name, default)
                 setattr(self, name, theano.shared(kwargs.get(name, default).get_value(), name=name))
         for param in self._nonshared_attrs():
             if type(param) is tuple:
                 name, default = param
             else:
                 name, default = param, None
+            if name not in kwargs:
+                print 'warning: %s not found, setting to default %s' % (name, default)
             setattr(self, name, kwargs.get(name, default))
 
     def __setstate__(self, state):
         self._set_attrs(**state)
-        # self._initialize()
+        self._initialize()
 
     def __getstate__(self):
         state = {}
@@ -76,8 +82,7 @@ class VectorEmbeddings(object):
 
 class EmbeddingLayer(Picklable, VectorEmbeddings):
     def _nonshared_attrs(self):
-        return ['mode',
-                'vocab_size',
+        return [ 'vocab_size',
                 'dimensions',
                 'adagrad',
                 ]
@@ -87,7 +92,7 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
                 'learning_rate',
                 'gradient_norms_sums']
 
-    def __init__(self, rng, vocab_size, dimensions, initial_embedding_range=0.01, initial_embeddings=None, mode='FAST_RUN', adagrad=False, learning_rate=0.01):
+    def __init__(self, rng, vocab_size, dimensions, initial_embedding_range=0.01, initial_embeddings=None, adagrad=False, learning_rate=0.01):
         """ Initialize the parameters of the embedding layer
 
         :type rng: nympy.random.RandomState
@@ -119,10 +124,10 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
 
         self._set_attrs(vocab_size=vocab_size,
                         dimensions=dimensions,
-                        mode=mode,
                         embedding=initial_embeddings,
                         gradient_norms_sums=gradient_norms_sums,
                         learning_rate=learning_rate,
+                        adagrad=adagrad,
                         )
         self._initialize()
 
@@ -299,7 +304,6 @@ class HiddenLayer(Picklable):
 class ScaledBilinear(Picklable):
     def _nonshared_attrs(self):
         return [
-            'mode',
             'adagrad',
         ]
 
@@ -428,12 +432,14 @@ class SimilarityNN(Picklable, VectorEmbeddings):
 
         cost, indices, embeddings = self.cost(index_a, index_b, similarity)
         if cost_addition:
-            cost += cost_addition(indices, embeddings)
-        updates = self.updates(cost,
+            augmented_cost = cost + cost_addition(indices, embeddings)
+        else:
+            augmented_cost = cost
+        updates = self.updates(augmented_cost,
                                indices,
                                embeddings)
 
-        return theano.function(inputs=[index_a, index_b, similarity], outputs=cost, updates=updates, mode=self.mode)
+        return theano.function(inputs=[index_a, index_b, similarity], outputs=[augmented_cost, cost], updates=updates, mode=self.mode)
 
     def _make_scoring(self):
         index_a = self._index_variable('index_a')
@@ -537,13 +543,15 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
 
         cost, indices, embeddings = self.cost(correct_indices, error_indices)
         if cost_addition:
-            cost += cost_addition(indices, embeddings)
-        updates = self.updates(cost,
+            augmented_cost = cost + cost_addition(indices, embeddings)
+        else:
+            augmented_cost = cost
+        updates = self.updates(augmented_cost,
                                indices,
                                embeddings)
 
         inputs = correct_indices + error_indices
-        outputs = cost
+        outputs = [augmented_cost, cost]
         return theano.function(inputs=inputs, outputs=outputs, updates=updates, mode=self.mode)
 
     def _make_scoring(self):
@@ -648,13 +656,15 @@ class TranslationalNN(Picklable, VectorEmbeddings):
                                                                                          left_bad, right_bad, rel_bad)
 
         if cost_addition:
-            cost += cost_addition(entity_indices, entity_embeddings)
+            augmented_cost = cost + cost_addition(entity_indices, entity_embeddings)
+        else:
+            augmented_cost = cost
         updates = self.updates(cost,
                                entity_indices, entity_embeddings,
                                rel_indices, rel_embeddings)
 
         return theano.function(inputs=[left_good, right_good, rel_good, left_bad, right_bad, rel_bad],
-                               outputs=cost,
+                               outputs=[augmented_cost, cost],
                                updates=updates,
                                mode=self.mode)
 

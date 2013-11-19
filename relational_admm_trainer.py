@@ -11,11 +11,28 @@ import os
 from utils import models_in_folder
 import random
 import theano
-from admm_trainer import validate_syntactic
 from os.path import join
 from relational.synset_to_word import Relationships, SynsetToWord
 
 theano.config.exception_verbosity = 'high'
+
+def validate_syntactic(model, testing_block, ngram_reader, rng=None):
+    if rng is None:
+        rng = np.random
+
+    test_values = []
+    test_frequencies = []
+    n_test_instances = testing_block.shape[0]
+    for test_index in xrange(n_test_instances):
+        if test_index % print_freq == 0:
+            sys.stdout.write('\rtesting instance %d of %d (%f %%)\r' % (test_index, n_test_instances, 100. * test_index / n_test_instances))
+            sys.stdout.flush()
+        correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(testing_block[test_index], replacement_column_index=replacement_column_index, rng=rng)
+        test_values.append(model.w_trainer.score(*list(correct_symbols)) - model.w_trainer.score(*list(error_symbols)))
+        test_frequencies.append(ngram_frequency)
+    test_mean = np.mean(test_values)
+    test_weighted_mean = np.mean(np.array(test_values) * np.array(test_frequencies))
+    return test_mean, test_weighted_mean
 
 if __name__ == "__main__":
     import argparse
@@ -201,7 +218,6 @@ if __name__ == "__main__":
         all_stats = pandas.DataFrame()
 
     vocab_size = args['vocab_size']
-    k_nearest = args['k_nearest']
 
     while True:
         last_time = time.clock()
@@ -210,6 +226,7 @@ if __name__ == "__main__":
 
         if not args['dont_run_syntactic']:
             # syntactic update step
+            augmented_costs = []
             costs = []
             for block_num in xrange(args['syntactic_blocks_to_run']):
                 training_block = ngram_reader.training_block(data_rng.random_sample())
@@ -220,7 +237,8 @@ if __name__ == "__main__":
                         sys.stdout.flush()
                     train_index = sample_cumulative_discrete_distribution(training_block[:,-1], rng=data_rng)
                     correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], rng=data_rng)
-                    cost = model.update_w(*(list(correct_symbols) + list(error_symbols)))
+                    augmented_cost, cost = model.update_w(*(list(correct_symbols) + list(error_symbols)))
+                    augmented_costs.append(augmented_cost)
                     costs.append(cost)
                 if args['syntactic_blocks_to_run'] > 1:
                     print
@@ -232,6 +250,10 @@ if __name__ == "__main__":
             print 'training:'
             print 'syntactic mean cost \t%f' % stats_for_k['syntactic_mean']
             print 'syntactic std cost \t%f' % stats_for_k['syntactic_std']
+            stats_for_k['syntactic_mean_augmented'] = np.mean(augmented_costs)
+            stats_for_k['syntactic_std_augmented'] = np.std(augmented_costs)
+            print 'syntactic mean augmented cost \t%f' % stats_for_k['syntactic_mean_augmented']
+            print 'syntactic std augmented cost \t%f' % stats_for_k['syntactic_std_augmented']
 
             # syntactic validation
             syn_validation_mean, syn_validation_weighted_mean = validate_syntactic(model, testing_block, ngram_reader, validation_rng)
@@ -247,6 +269,7 @@ if __name__ == "__main__":
         # semantic update step
         if not args['dont_run_semantic']:
             this_count = 0
+            augmented_costs = []
             costs = []
             for block_num in xrange(args['semantic_blocks_to_run']):
                 skip_count = 0
@@ -291,7 +314,9 @@ if __name__ == "__main__":
                         while rel_index_new == rel_index:
                             rel_index_new = data_rng.randint(N_relationships)
 
-                    cost = model.update_v(word_a, word_b, rel_index, word_a_new, word_b_new, rel_index_new)
+                    augmented_cost, cost = model.update_v(word_a, word_b, rel_index, word_a_new, word_b_new, rel_index_new)
+                    costs.append(cost)
+                    augmented_costs.append(augmented_cost)
 
                     if i % print_freq == 0:
                         sys.stdout.write('\r k %i: pair : %d / %d' % (model.k, i, block_size))
@@ -305,6 +330,10 @@ if __name__ == "__main__":
             stats_for_k['semantic_std'] = np.std(costs)
             print 'semantic mean cost \t%f' % stats_for_k['semantic_mean']
             print 'semantic std cost \t%f' % stats_for_k['semantic_std']
+            stats_for_k['semantic_mean_augmented'] = np.mean(augmented_costs)
+            stats_for_k['semantic_std_augmented'] = np.std(augmented_costs)
+            print 'semantic mean augmented cost \t%f' % stats_for_k['semantic_mean_augmented']
+            print 'semantic std augmented cost \t%f' % stats_for_k['semantic_std_augmented']
 
             # semantic validation
             # semantic_mean_jaccard = validate_semantic(model, args['sem_validation_num_to_test'], args['sem_validation_num_nearest'], word_similarity, validation_rng)

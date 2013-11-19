@@ -19,19 +19,19 @@ with gzip.open('/cl/work/dfried/models/factorial/no_init_0.01/model-650.pkl.gz')
     model_dist = cPickle.load(f)
     load_vocab(model_dist.semantic_model)
 
-from query import query
-words = lambda lst: map(lambda (p, q): p, lst)
-print 'admm direct model'
-print words(query(model_dist, 'king'))
-print words(query(model_dist.syntactic_model, 'king'))
-print words(query(model_dist.semantic_model, 'king'))
+# from query import query
+# words = lambda lst: map(lambda (p, q): p, lst)
+# print 'admm direct model'
+# print words(query(model_dist, 'king'))
+# print words(query(model_dist.syntactic_model, 'king'))
+# print words(query(model_dist.semantic_model, 'king'))
 
-print 'admm net model'
-print words(query(model_net, 'king'))
-print words(query(model_net.syntactic_model, 'king'))
-print words(query(model_net.semantic_model, 'king'))
+# print 'admm net model'
+# print words(query(model_net, 'king'))
+# print words(query(model_net.syntactic_model, 'king'))
+# print words(query(model_net.semantic_model, 'king'))
 
-print 'neural tensor admm'
-print words(query(model, 'king'))
-print words(query(model.syntactic_model, 'king'))
-print words(query(model.semantic_model, 'king'))
+# print 'neural tensor admm'
+# print words(query(model, 'king'))
+# print words(query(model.syntactic_model, 'king'))
+# print words(query(model.semantic_model, 'king'))

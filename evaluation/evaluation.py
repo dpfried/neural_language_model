@@ -48,8 +48,13 @@ def make_series(model_root_folder,
         if n in stats.index:
             print 'already has %i' % n
             continue
-        with gzip.open(models[n]) as f:
-            model = cPickle.load(f)
+        try:
+            print 'loading %i' % n
+            with gzip.open(models[n]) as f:
+                model = cPickle.load(f)
+        except Exception as e:
+            print e
+            continue
         # load the vocabulary if not already cached
         if not vocab_container:
             vocab_container = get_vocab_container(model)

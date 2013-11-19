@@ -15,13 +15,13 @@ class Picklable(object):
     def _nonshared_attrs(self):
         # should be overridden by subclasses to return a list of strings, which
         # will be the names of object attributes that should be pickled
-        pass
+        return []
 
     def _shared_attrs(self):
         # should be overridden by subclasses to return a list of strings, which
         # will be the names of theano shared variable object attributes that
         # should be pickled
-        pass
+        return []
 
     def _initialize(self):
         # override this with any code that should be run after unpickling, e.g.
@@ -48,7 +48,7 @@ class Picklable(object):
 
     def __setstate__(self, state):
         self._set_attrs(**state)
-        self._initialize()
+        # self._initialize()
 
     def __getstate__(self):
         state = {}
@@ -76,7 +76,7 @@ class VectorEmbeddings(object):
 
 class EmbeddingLayer(Picklable, VectorEmbeddings):
     def _nonshared_attrs(self):
-        return [('mode', 'FAST_RUN'),
+        return ['mode',
                 'vocab_size',
                 'dimensions',
                 'adagrad',
@@ -86,10 +86,6 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
         return ['embedding',
                 'learning_rate',
                 'gradient_norms_sums']
-
-    def _initialize(self):
-        self.gradient_norms_sums
-        self.params = []
 
     def __init__(self, rng, vocab_size, dimensions, initial_embedding_range=0.01, initial_embeddings=None, mode='FAST_RUN', adagrad=False, learning_rate=0.01):
         """ Initialize the parameters of the embedding layer
@@ -167,9 +163,6 @@ class LinearScalarResponse(Picklable):
     def _shared_attrs(self):
         return ['W', 'b', 'learning_rate', 'dW_sum_squares', 'db_sum_squares']
 
-    def _initialize(self):
-        self.params = [self.W, self.b]
-
     def __init__(self, n_in, learning_rate=0.01, adagrad=False):
         # init the weights W as a vector of zeros
         W_values = np.zeros((n_in,), dtype=theano.config.floatX)
@@ -216,9 +209,6 @@ class HiddenLayer(Picklable):
 
     def _shared_attrs(self):
         return ['W', 'b', 'learning_rate', 'dW_sum_squares', 'db_sum_squares']
-
-    def _initialize(self):
-        self.params = [self.W, self.b]
 
     def __init__(self, rng, n_in, n_out, activation=T.nnet.sigmoid, adagrad=False, learning_rate=0.01):
         """
@@ -309,7 +299,7 @@ class HiddenLayer(Picklable):
 class ScaledBilinear(Picklable):
     def _nonshared_attrs(self):
         return [
-            ('mode', 'FAST_RUN'),
+            'mode',
             'adagrad',
         ]
 
@@ -321,9 +311,6 @@ class ScaledBilinear(Picklable):
             'dw_sum_squares',
             'db_sum_squares',
         ]
-
-    def _initialize(self):
-        self.params = [self.w, self.b]
 
     def __init__(self, adagrad=False, learning_rate=0.01):
         w = np.cast[theano.config.floatX](0.0)
@@ -374,17 +361,13 @@ class EuclideanDistance(ScaledBilinear):
 class SimilarityNN(Picklable, VectorEmbeddings):
     def _nonshared_attrs(self):
         return ['other_params',
-                ('mode', 'FAST_RUN'),
+                'mode',
                 'embedding_layer',
                 'similarity_layer',
                 'dimensions',
                 'vocab_size']
 
-    def _shared_attrs(self):
-        return []
-
     def _initialize(self):
-        self.params =  self.similarity_layer.params
         self.train = self._make_training()
         self.score = self._make_scoring()
 
@@ -392,7 +375,7 @@ class SimilarityNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, adagrad=True, similarity_klass=CosineSimilarity):
+    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, adagrad=False, similarity_class=CosineSimilarity):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -404,7 +387,7 @@ class SimilarityNN(Picklable, VectorEmbeddings):
                                          learning_rate=learning_rate,
                                          adagrad=adagrad)
 
-        similarity_layer = similarity_klass(learning_rate=learning_rate,
+        similarity_layer = similarity_class(learning_rate=learning_rate,
                                       adagrad=adagrad)
 
         self._set_attrs(other_params=other_params,
@@ -464,7 +447,7 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         return ['n_hidden',
                 'other_params',
                 'blocks_trained',
-                ('mode', 'FAST_RUN'),
+                'mode',
                 'embedding_layer',
                 'hidden_layer',
                 'output_layer',
@@ -472,11 +455,7 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
                 'sequence_length',
                 'vocab_size']
 
-    def _shared_attrs(self):
-        return []
-
     def _initialize(self):
-        self.params =  self.hidden_layer.params + self.output_layer.params
         self.train = self._make_training()
         self.score = self._make_scoring()
 
@@ -484,7 +463,7 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, adagrad=True):
+    def __init__(self, rng, vocab_size,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, adagrad=False):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -572,6 +551,118 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         score, embeddings = self(indices)
         return theano.function(inputs=indices, outputs=score, mode=self.mode)
 
+class TranslationalNN(Picklable, VectorEmbeddings):
+    def _nonshared_attrs(self):
+        return ['other_params',
+                'mode',
+                'embedding_layer',
+                'translation_layer',
+                'n_rel',
+                'dimensions',
+                'vocab_size']
+
+    def _initialize(self):
+        self.train = self._make_training()
+        self.score = self._make_scoring()
+
+    @property
+    def embeddings(self):
+        return self.embedding_layer.embeddings
+
+    def __init__(self, rng, vocab_size, n_rel, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, adagrad=False):
+        # initialize parameters
+        if other_params is None:
+            other_params = {}
+
+        embedding_layer = EmbeddingLayer(rng,
+                                         vocab_size=vocab_size,
+                                         dimensions=dimensions,
+                                         initial_embeddings=initial_embeddings,
+                                         learning_rate=learning_rate,
+                                         adagrad=adagrad)
+
+        # represent each of n_rel relationships as a vector embedding to be
+        # added to the embedding of the left entity in the relationship
+        translation_layer = EmbeddingLayer(rng,
+                                           vocab_size=n_rel,
+                                           dimensions=dimensions,
+                                           learning_rate=learning_rate,
+                                           adagrad=adagrad)
+
+        self._set_attrs(other_params=other_params,
+                        mode=mode,
+                        embedding_layer=embedding_layer,
+                        translation_layer=translation_layer,
+                        dimensions=dimensions,
+                        n_rel=n_rel,
+                        vocab_size=vocab_size)
+        self._initialize()
+
+
+    def __call__(self, left_entity_index, right_entity_index, relationship_index):
+        """
+        score the given entity with the given relationship, and return the lists
+        of embeddings for use in differentiation
+        """
+        left_embedding = self.embedding_layer(left_entity_index)
+        right_embedding = self.embedding_layer(right_entity_index)
+        rel_embedding = self.translation_layer(relationship_index)
+
+        composite = left_embedding + rel_embedding - right_embedding
+        score = -1 * T.sqrt(T.sum(composite **2, -1))
+
+        return score, [left_embedding, right_embedding], [rel_embedding]
+
+    def updates(self, cost, entity_index_list, entity_embedding_list, relationship_index_list, relationship_embedding_list):
+        return self.embedding_layer.updates(cost, entity_index_list, entity_embedding_list)\
+                + self.translation_layer.updates(cost, relationship_index_list, relationship_embedding_list)
+
+    def cost(self,
+             left_index_good, right_index_good, rel_index_good,
+             left_index_bad, right_index_bad, rel_index_bad):
+
+        good_entity_indices = [left_index_good, right_index_good]
+        bad_entity_indices = [left_index_bad, right_index_bad]
+
+        good_score, good_entity_embeddings, good_rel_embeddings = self(left_index_good, right_index_good, rel_index_good)
+        bad_score, bad_entity_embeddings, bad_rel_embeddings = self(left_index_bad, right_index_bad, rel_index_bad)
+
+        cost = T.clip(1 - good_score + bad_score, 0, np.inf)
+
+        entity_indices = good_entity_indices + bad_entity_indices
+        rel_indices = [rel_index_good, rel_index_bad]
+
+        entity_embeddings = good_entity_embeddings + bad_entity_embeddings
+        rel_embeddings = good_rel_embeddings + bad_rel_embeddings
+
+        return cost, entity_indices, entity_embeddings, rel_indices, rel_embeddings
+
+
+    def _index_variable(self, name='index'):
+        return T.lscalar(name)
+
+    def _make_training(self, cost_addition=None):
+        left_good, left_bad, right_good, right_bad, rel_good, rel_bad = map(self._index_variable, ['left_good', 'left_bad', 'right_good', 'right_bad', 'rel_good', 'rel_bad'])
+
+        cost, entity_indices, entity_embeddings, rel_indices, rel_embeddings = self.cost(left_good, right_good, rel_good,
+                                                                                         left_bad, right_bad, rel_bad)
+
+        if cost_addition:
+            cost += cost_addition(entity_indices, entity_embeddings)
+        updates = self.updates(cost,
+                               entity_indices, entity_embeddings,
+                               rel_indices, rel_embeddings)
+
+        return theano.function(inputs=[left_good, right_good, rel_good, left_bad, right_bad, rel_bad],
+                               outputs=cost,
+                               updates=updates,
+                               mode=self.mode)
+
+    def _make_scoring(self):
+        left, right, rel = map(self._index_variable, ['left_index', 'right_index', 'rel_index'])
+        score, _, _ = self(left, right, rel)
+        return theano.function(inputs=[left, right, rel], outputs=score, mode=self.mode)
+
 class ADMM(Picklable):
     def _admm_cost(self, side='w'):
         if side == 'w':
@@ -605,7 +696,7 @@ class ADMM(Picklable):
                 'indices_in_intersection',
                 'other_params',
                 'rho',
-                ('mode', 'FAST_RUN'),
+                'mode',
                 'k']
 
     def __init__(self, w_trainer, v_trainer, vocab_size, indices_in_intersection, dimensions, rho, other_params=None, mode='FAST_RUN'):

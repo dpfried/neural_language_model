@@ -40,7 +40,7 @@ def models_in_folder(folder):
 
 def line_styles(number_of_lines):
     colors = 'bgrcmy'
-    lines = ['-', '--']
+    lines = ['-', '--', ':']
     if number_of_lines > len(colors):
         return itertools.imap(lambda strs: ''.join(strs), itertools.cycle(itertools.product(colors, lines)))
     else:

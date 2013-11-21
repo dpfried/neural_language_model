@@ -37,6 +37,8 @@ def make_series(model_root_folder,
     latest_num = model_nums[-1] if model_nums else -1
     latest_num = -1
 
+    print 'plotting every %i' % plot_interval
+
     to_plot = [n for n in model_nums if n % plot_interval == 0 and n != latest_num]
     if 1 in model_nums:
         to_plot = [1] + to_plot
@@ -101,6 +103,11 @@ if __name__ == "__main__":
     parser.add_argument('--no_new', action='store_true')
     parser.add_argument('--save_graphs_base')
     args = parser.parse_args()
+
+    import config
+    # we only read the values from the models, we don't need to have any
+    # compiled theano functions
+    config.DYNAMIC['compile_on_load'] = False
 
     all_stats = dict((model_directory, make_series(model_directory,
                                                    **vars(args)))

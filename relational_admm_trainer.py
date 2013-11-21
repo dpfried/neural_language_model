@@ -1,7 +1,7 @@
 import time
 import json
 import pandas
-from models import SequenceScoringNN, TranslationalNN, ADMM
+from models import SequenceScoringNN, ADMM, TensorNN, TranslationalNN
 from ngrams import NgramReader
 import numpy as np
 from utils import sample_cumulative_discrete_distribution
@@ -60,8 +60,10 @@ if __name__ == "__main__":
 
     # params for semantic
     parser.add_argument('--dont_run_semantic', action='store_true')
+    parser.add_argument('--model_class', type=str, default='TranslationalNN')
     parser.add_argument('--existing_semantic_model', help='use this existing trained model as the semantic model')
     parser.add_argument('--semantic_learning_rate', type=float, default=0.01)
+    parser.add_argument('--semantic_tensor_n_hidden', type=int, default=50)
     # parser.add_argument('--semantic_block_size', type=int, default=100000)
     # parser.add_argument('--sem_validation_num_nearest', type=int, default=50, help='when running semantic validation after each round, look at the intersection of top N words in wordnet and top N by embedding for a given test word')
     # parser.add_argument('--sem_validation_num_to_test', type=int, default=500, help='in semantic validation after each round, the number of test words to sample')
@@ -176,13 +178,20 @@ if __name__ == "__main__":
                 else:
                     _semantic_model = loaded_model
         else:
-            _semantic_model = TranslationalNN(rng=rng,
-                                              vocab_size=args['vocab_size'],
-                                              n_rel=len(relationships.relationships),
-                                              dimensions=args['dimensions'],
-                                              learning_rate=args['semantic_learning_rate'],
-                                              mode=args['mode'],
-                                              adagrad=args['adagrad'])
+            semantic_class = eval(args['model_class'])
+            semantic_args = {
+                'rng': rng,
+                'vocab_size': args['vocab_size'],
+                'n_rel': len(relationships.relationships),
+                'dimensions': args['dimensions'],
+                'learning_rate': args['semantic_learning_rate'],
+                'mode': args['mode'],
+                'adagrad': args['adagrad']
+            }
+            if args['model_class'] == 'TensorNN':
+                semantic_args['n_hidden'] = args['semantic_tensor_n_hidden']
+
+            _semantic_model = semantic_class(**semantic_args)
 
         model = ADMM(w_trainer=_syntactic_model,
                      v_trainer=_semantic_model,

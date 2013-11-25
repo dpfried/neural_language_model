@@ -1,4 +1,3 @@
-from query import query
 import gzip, cPickle
 import fix_imports
 from relational.translation import *

@@ -4,6 +4,8 @@ import re
 import glob
 import os
 import itertools
+import gzip
+import cPickle
 
 def map_dict(fn, d):
     return { key: fn(value)
@@ -37,6 +39,10 @@ def models_in_folder(folder):
     model_fnames = glob.glob(get_model_fname('*'))
     return dict((int(MODEL_NUMBER_EXTRACTOR.match(fname).groups()[0]), fname)
                 for fname in model_fnames)
+
+def load_model(path):
+    with gzip.open(path) as f:
+        return cPickle.load(f)
 
 def line_styles(number_of_lines):
     colors = 'bgrcmy'

@@ -2,7 +2,8 @@ import theano
 import theano.tensor as T
 import numpy as np
 from scipy.spatial.distance import cdist
-import config
+from policies import SGD, VSGD
+from picklable import Picklable
 
 def column(vector):
     """
@@ -10,65 +11,8 @@ def column(vector):
     """
     return T.addbroadcast(T.stack(vector).T, 1)
 
-ADAGRAD_EPSILON = 1e-6 # prevent numerical errors if gradient is 0
-
-class Picklable(object):
-    def _nonshared_attrs(self):
-        # should be overridden by subclasses to return a list of strings, which
-        # will be the names of object attributes that should be pickled
-        return []
-
-    def _shared_attrs(self):
-        # should be overridden by subclasses to return a list of strings, which
-        # will be the names of theano shared variable object attributes that
-        # should be pickled
-        return []
-
-    def _initialize(self):
-        # override this with any code that should be run after unpickling, e.g.
-        # code that relies on the read parameters
-        pass
-
-    def _set_attrs(self, **kwargs):
-        for param in self._shared_attrs():
-            if type(param) is tuple:
-                name, default = param
-            else:
-                name, default = param, None
-            try:
-                if name not in kwargs:
-                    print 'warning: %s not found, setting to default %s' % (name, default)
-                setattr(self, name, theano.shared(kwargs.get(name, default), name=name))
-            except TypeError as e: # in case we stored the shared variable, get its current value
-                print e
-                if name not in kwargs:
-                    print 'warning: %s not found, setting to default %s' % (name, default)
-                setattr(self, name, theano.shared(kwargs.get(name, default).get_value(), name=name))
-        for param in self._nonshared_attrs():
-            if type(param) is tuple:
-                name, default = param
-            else:
-                name, default = param, None
-            if name not in kwargs:
-                print 'warning: %s not found, setting to default %s' % (name, default)
-            setattr(self, name, kwargs.get(name, default))
-
-    def __setstate__(self, state):
-        self._set_attrs(**state)
-        if config.DYNAMIC['compile_on_load']:
-            self._initialize()
-
-    def __getstate__(self):
-        state = {}
-        for val in self._nonshared_attrs():
-            name = val[0] if type(val) is tuple else val
-            state[name] = getattr(self, name)
-        for val in self._shared_attrs():
-            name = val[0] if type(val) is tuple else val
-            state[name] = getattr(self, name).get_value()
-        return state
-
 class VectorEmbeddings(object):
+    """provides an interface for objects that contain vector embeddings of words or entities"""
     @property
     def embeddings(self):
         raise NotImplementedError('embeddings not implemented')
@@ -86,21 +30,18 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
     def _nonshared_attrs(self):
         return [ 'vocab_size',
                 'dimensions',
-                'adagrad',
+                'learning_rate',
+                ('policy_class', 'SGD')
                 ]
 
     def _shared_attrs(self):
-        return ['embedding',
-                'learning_rate',
-                'gradient_norms_sums']
+        return ['embedding' ]
 
-    @property
-    def ada_weights(self):
-        return {
-            'embedding': self.gradient_norms_sums,
-        }
+    def _initialize(self):
+        policy_class = eval(self.policy_class)
+        self.policy = policy_class(self.learning_rate, self.embedding)
 
-    def __init__(self, rng, vocab_size, dimensions, initial_embedding_range=0.01, initial_embeddings=None, adagrad=False, learning_rate=0.01):
+    def __init__(self, rng, vocab_size, dimensions, initial_embedding_range=0.01, initial_embeddings=None, policy_class='SGD', learning_rate=0.01):
         """ Initialize the parameters of the embedding layer
 
         :type rng: nympy.random.RandomState
@@ -126,16 +67,11 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
         else:
             assert initial_embeddings.shape == embedding_shape
 
-        gradient_norms_sums = np.ones(vocab_size, dtype=theano.config.floatX) * ADAGRAD_EPSILON
-
-        learning_rate = np.cast[theano.config.floatX](learning_rate)
-
         self._set_attrs(vocab_size=vocab_size,
                         dimensions=dimensions,
                         embedding=initial_embeddings,
-                        gradient_norms_sums=gradient_norms_sums,
                         learning_rate=learning_rate,
-                        adagrad=adagrad,
+                        policy_class=policy_class,
                         )
         self._initialize()
 
@@ -152,17 +88,7 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
         # embedding_list: a list of symbolic embeddings, one for each index in
         # index_list, to be updated with gradient descent
         # gradient descent
-        embedding_indices = T.stack(*index_list)
-        dembeddings = T.stack(*T.grad(cost, embedding_list))
-        gradient_norms = T.sqrt(T.sum(dembeddings ** 2, axis=1))
-        if self.adagrad:
-            update_weight = self.learning_rate / column(self.gradient_norms_sums[embedding_indices] + gradient_norms)
-        else:
-            update_weight = self.learning_rate
-        return [(self.embedding, T.inc_subtensor(self.embedding[embedding_indices],
-                                                 - update_weight * dembeddings)),
-                (self.gradient_norms_sums, T.inc_subtensor(self.gradient_norms_sums[embedding_indices],
-                                                           gradient_norms))]
+        return self.policy.updates_indexed(cost, index_list, embedding_list)
 
     @property
     def embeddings(self):
@@ -170,73 +96,46 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
 
 class LinearScalarResponse(Picklable):
     def _nonshared_attrs(self):
-        return ['n_in', 'adagrad']
+        return ['n_in', 'learning_rate', ('policy_class', 'SGD')]
 
     def _shared_attrs(self):
-        return ['W', 'b', 'learning_rate', 'dW_sum_squares', 'db_sum_squares']
+        return ['W', 'b']
 
-    @property
-    def ada_weights(self):
-        return {
-            'W': self.dW_sum_squares,
-            'b': self.db_sum_squares,
-        }
+    def _initialize(self):
+        policy_class = eval(self.policy_class)
+        self.W_policy = policy_class(self.learning_rate, self.W)
+        self.b_policy = policy_class(self.learning_rate, self.b)
 
-    def __init__(self, n_in, learning_rate=0.01, adagrad=False):
+    def __init__(self, n_in, learning_rate=0.01, policy_class='SGD'):
         # init the weights W as a vector of zeros
         W_values = np.zeros((n_in,), dtype=theano.config.floatX)
-        dW_ss = np.ones_like(W_values, dtype=theano.config.floatX) * ADAGRAD_EPSILON
 
         # init the basis as a scalar, 0
         b_values = np.cast[theano.config.floatX](0.0)
-        db_ss = np.cast[theano.config.floatX](ADAGRAD_EPSILON)
-
-        learning_rate = np.cast[theano.config.floatX](learning_rate)
 
         self._set_attrs(W=W_values,
                         b=b_values,
                         n_in=n_in,
                         learning_rate=learning_rate,
-                        dW_sum_squares=dW_ss,
-                        db_sum_squares=db_ss,
-                        adagrad=adagrad)
+                        policy_class=policy_class,
+                        )
+
         self._initialize()
 
     def __call__(self, x):
         return T.dot(x, self.W) + self.b
 
     def updates(self, cost):
-        dW, db = T.grad(cost, [self.W, self.b])
-        dW_ss = self.dW_sum_squares + dW**2
-        db_ss = self.db_sum_squares + db**2
-        if self.adagrad:
-            dW_weight = self.learning_rate / T.sqrt(dW_ss)
-            db_weight = self.learning_rate / T.sqrt(db_ss)
-        else:
-            dW_weight = self.learning_rate
-            db_weight = self.learning_rate
-        return [
-            (self.W, self.W - dW_weight * dW),
-            (self.b, self.b - db_weight * db),
-            (self.dW_sum_squares, dW_ss),
-            (self.db_sum_squares, db_ss),
-        ]
+        return self.W_policy.updates(cost) + self.b_policy.updates(cost)
 
 class HiddenLayer(Picklable):
     def _nonshared_attrs(self):
-        return ['activation', 'n_in', 'n_out', 'adagrad']
+        return ['activation', 'n_in', 'n_out', 'learning_rate', ('policy_class', 'SGD')]
 
     def _shared_attrs(self):
-        return ['W', 'b', 'learning_rate', 'dW_sum_squares', 'db_sum_squares']
+        return ['W', 'b']
 
-    @property
-    def ada_weights(self):
-        return {
-            'W': self.dW_sum_squares,
-            'b': self.db_sum_squares,
-        }
-
-    def __init__(self, rng, n_in, n_out, activation=T.nnet.sigmoid, adagrad=False, learning_rate=0.01):
+    def __init__(self, rng, n_in, n_out, activation=T.nnet.sigmoid, policy_class='SGD', learning_rate=0.01):
         """
         Typical hidden layer of a MLP: fully connected units with sigmoidal
         activation function. Weight matrix has shape (n_in, n_out)
@@ -276,109 +175,70 @@ class HiddenLayer(Picklable):
             low=-np.sqrt(6. / (n_in + n_out)),
             high=np.sqrt(6. / (n_in + n_out)),
             size=size), dtype=theano.config.floatX)
-        dW_ss = np.ones_like(W_values, dtype=theano.config.floatX) * ADAGRAD_EPSILON
 
         if activation == T.nnet.sigmoid:
             W_values *= 4
 
         if n_out > 1:
             b_values = np.zeros((n_out,), dtype=theano.config.floatX)
-            db_ss = np.ones_like(b_values, dtype=theano.config.floatX) * ADAGRAD_EPSILON
         else:
             b_values = np.cast[theano.config.floatX](0.0)
-            db_ss = np.cast[theano.config.floatX](ADAGRAD_EPSILON)
-
-        learning_rate = np.cast[theano.config.floatX](learning_rate)
 
         self._set_attrs(W=W_values,
                         b=b_values,
                         activation=activation,
                         n_in=n_in,
                         n_out=n_out,
-                        adagrad=adagrad,
                         learning_rate=learning_rate,
-                        dW_sum_squares=dW_ss,
-                        db_sum_squares=db_ss)
+                        policy_class=policy_class,
+                        )
+
         self._initialize()
+
+    def _initialize(self):
+        policy_class = eval(self.policy_class)
+        self.W_policy = policy_class(self.learning_rate, self.W)
+        self.b_policy = policy_class(self.learning_rate, self.b)
 
     def __call__(self, x):
         return self.activation(T.dot(x, self.W) + self.b)
 
     def updates(self, cost):
-        dW, db = T.grad(cost, [self.W, self.b])
-        dW_ss = self.dW_sum_squares + dW**2
-        db_ss = self.db_sum_squares + db**2
-        if self.adagrad:
-            dW_weight = self.learning_rate / T.sqrt(dW_ss)
-            db_weight = self.learning_rate / T.sqrt(db_ss)
-        else:
-            dW_weight = self.learning_rate
-            db_weight = self.learning_rate
-        return [
-            (self.W, self.W - dW_weight * dW),
-            (self.b, self.b - db_weight * db),
-            (self.dW_sum_squares, dW_ss),
-            (self.db_sum_squares, db_ss),
-        ]
-
+        return self.W_policy.updates(cost) + self.b_policy.updates(cost)
 
 class ScaledBilinear(Picklable):
     def _nonshared_attrs(self):
         return [
-            'adagrad',
+            ('policy_class', 'SGD'),
+            'learning_rate',
         ]
 
     def _shared_attrs(self):
         return [
-            'learning_rate',
             'w',
             'b',
-            'dw_sum_squares',
-            'db_sum_squares',
         ]
 
-    @property
-    def ada_weights(self):
-        return {
-            'w': self.dw_sum_squares,
-            'b': self.db_sum_squares,
-        }
-
-    def __init__(self, adagrad=False, learning_rate=0.01):
+    def __init__(self, policy_class='SGD', learning_rate=0.01):
         w = np.cast[theano.config.floatX](0.0)
-        dw_ss = np.cast[theano.config.floatX](ADAGRAD_EPSILON)
         b = np.cast[theano.config.floatX](0.0)
-        db_ss = np.cast[theano.config.floatX](ADAGRAD_EPSILON)
-
-        learning_rate = np.cast[theano.config.floatX](learning_rate)
 
         self._set_attrs(w=w,
                         b=b,
-                        adagrad=adagrad,
                         learning_rate=learning_rate,
-                        dw_sum_squares=dw_ss,
-                        db_sum_squares=db_ss)
+                        policy_class=policy_class)
         self._initialize()
+
+    def _initialize(self):
+        policy_class = eval(self.policy_class)
+        self.w_policy = policy_class(self.learning_rate, self.w)
+        self.b_policy = policy_class(self.learning_rate, self.b)
 
     def __call__(self, x, y):
         pass
 
     def updates(self, cost):
-        dw, db = T.grad(cost, [self.w, self.b])
-        dw_ss = self.dw_sum_squares + dw**2
-        db_ss = self.db_sum_squares + db**2
-        if self.adagrad:
-            dw_weight = self.learning_rate / T.sqrt(dw_ss)
-            db_weight = self.learning_rate / T.sqrt(db_ss)
-        else:
-            dw_weight = self.learning_rate
-            db_weight = self.learning_rate
-        return [
-            (self.w, self.w - dw_weight * dw),
-            (self.b, self.b - db_weight * db),
-            (self.dw_sum_squares, dw_ss),
-            (self.db_sum_squares, db_ss),
-        ]
+        return self.w_policy.updates(cost) + self.b_policy.updates(cost)
 
 class CosineSimilarity(ScaledBilinear):
     def __call__(self, x, y):
@@ -411,7 +271,7 @@ class SimilarityNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, adagrad=False, similarity_class=CosineSimilarity):
+    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, policy_class='SGD', similarity_class=CosineSimilarity):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -421,10 +281,11 @@ class SimilarityNN(Picklable, VectorEmbeddings):
                                          dimensions=dimensions,
                                          initial_embeddings=initial_embeddings,
                                          learning_rate=learning_rate,
-                                         adagrad=adagrad)
+                                         policy_class=policy_class,
+                                         )
 
         similarity_layer = similarity_class(learning_rate=learning_rate,
-                                      adagrad=adagrad)
+                                            policy_class=policy_class)
 
         self._set_attrs(other_params=other_params,
                         mode=mode,
@@ -504,7 +365,7 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, adagrad=False):
+    def __init__(self, rng, vocab_size,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, policy_class='SGD'):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -515,17 +376,17 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
                                          dimensions=dimensions,
                                          initial_embeddings=initial_embeddings,
                                          learning_rate=learning_rate,
-                                         adagrad=adagrad)
+                                         policy_class=policy_class)
 
         hidden_layer = HiddenLayer(rng=rng,
                                    n_in=dimensions * sequence_length,
                                    n_out=n_hidden,
                                    activation=T.nnet.sigmoid,
                                    learning_rate=learning_rate,
-                                   adagrad=adagrad)
+                                   policy_class=policy_class)
 
         output_layer = LinearScalarResponse(n_in=n_hidden,
-                                            adagrad=adagrad,
+                                            policy_class=policy_class,
                                             learning_rate=learning_rate)
 
         self._set_attrs(n_hidden=n_hidden,
@@ -616,7 +477,7 @@ class TranslationalNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size, n_rel, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, adagrad=False):
+    def __init__(self, rng, vocab_size, n_rel, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, policy_class='SGD'):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -626,7 +487,7 @@ class TranslationalNN(Picklable, VectorEmbeddings):
                                          dimensions=dimensions,
                                          initial_embeddings=initial_embeddings,
                                          learning_rate=learning_rate,
-                                         adagrad=adagrad)
+                                         policy_class=policy_class)
 
         # represent each of n_rel relationships as a vector embedding to be
         # added to the embedding of the left entity in the relationship
@@ -634,7 +495,7 @@ class TranslationalNN(Picklable, VectorEmbeddings):
                                            vocab_size=n_rel,
                                            dimensions=dimensions,
                                            learning_rate=learning_rate,
-                                           adagrad=adagrad)
+                                           policy_class=policy_class)
 
         self._set_attrs(other_params=other_params,
                         mode=mode,
@@ -714,28 +575,18 @@ class TranslationalNN(Picklable, VectorEmbeddings):
 
 class NeuralTensorLayer(Picklable):
     def _shared_attrs(self):
-        return ['W', 'V', 'b', 'learning_rate']
+        return ['W', 'V', 'b']
 
     def _nonshared_attrs(self):
-        return ['n_rel', 'n_in', 'n_out', 'activation']
+        return ['n_rel', 'n_in', 'n_out', 'activation', 'learning_rate', 'policy_class']
 
-    @property
-    def ada_weights(self):
-        return {
-            'W': self.dW_sum_squares,
-            'V': self.dV_sum_squares,
-            'b': self.db_sum_squares,
-        }
+    def _initialize(self):
+        policy_class = eval(self.policy_class)
+        self.W_policy = policy_class(self.learning_rate, self.W)
+        self.V_policy = policy_class(self.learning_rate, self.V)
+        self.b_policy = policy_class(self.learning_rate, self.b)
 
-    # n_rel: number of relations (number of 3d tensors)
-    # n_in: input dimensionality
-    # n_out: output dimensionality
-    # W: a 4d tensor containing a set of 3d relationship tensors. Dimensions: (n_rel, n_out, n_in, n_in)
-    # V: a 3d tensor containing a set of 2d hidden layer matrics. Dimensions: (n_rel, n_out, 2*n_in)
-
-    def __init__(self, rng, n_rel, n_in, n_out, activation=T.tanh, adagrad=False, learning_rate=0.01):
-        if adagrad:
-            print 'warning: adagrad unimplemented for TensorLayer'
+    def __init__(self, rng, n_rel, n_in, n_out, activation=T.tanh, policy_class='SGD', learning_rate=0.01):
 
         W_size = (n_rel, n_out, n_in, n_in)
         # what to change this heuristic to?
@@ -767,6 +618,7 @@ class NeuralTensorLayer(Picklable):
                         n_in=n_in,
                         n_out=n_out,
                         activation=activation,
+                        policy_class=policy_class,
                         learning_rate=learning_rate)
 
     def __call__(self, x1, x2, relation_index):
@@ -790,14 +642,9 @@ class NeuralTensorLayer(Picklable):
         V_rel_list: the list of subtensors of V corresponding to indices in relationship_index_list
         b_rel_list: the list of rows of b corresponding to indices in relationship_index_list
         """
-        indices = T.stack(*relation_index_list)
-        dW = T.stack(*T.grad(cost, W_rel_list))
-        dV = T.stack(*T.grad(cost, V_rel_list))
-        db = T.stack(*T.grad(cost, b_rel_list))
-        return [(self.b, T.inc_subtensor(self.b[indices], - self.learning_rate * db)),
-                (self.W, T.inc_subtensor(self.W[indices], - self.learning_rate * dW)),
-                (self.V, T.inc_subtensor(self.V[indices], - self.learning_rate * dV))]
-
+        return self.W_policy.updates_indexed(cost, relation_index_list, W_rel_list) +\
+                self.V_policy.updates_indexed(cost, relation_index_list, V_rel_list) +\
+                self.b_policy.updates_indexed(cost, relation_index_list, b_rel_list)
 
 class TensorNN(Picklable, VectorEmbeddings):
     def _nonshared_attrs(self):
@@ -815,22 +662,20 @@ class TensorNN(Picklable, VectorEmbeddings):
         self.train = self._make_training()
         self.score = self._make_scoring()
 
-    def __init__(self, rng, vocab_size, n_rel, dimensions, n_hidden=None, other_params=None, learning_rate=0.01, mode='FAST_RUN', initial_embeddings=None, adagrad=False):
+    def __init__(self, rng, vocab_size, n_rel, dimensions, n_hidden=None, other_params=None, learning_rate=0.01, mode='FAST_RUN', initial_embeddings=None, policy_class='SGD'):
         if other_params is None:
             other_params = {}
-
-        learning_rate = np.cast[theano.config.floatX](learning_rate)
 
         embedding_layer = EmbeddingLayer(rng,
                                          vocab_size=vocab_size,
                                          dimensions=dimensions,
                                          learning_rate=learning_rate,
-                                         adagrad=adagrad,
+                                         policy_class=policy_class,
                                          initial_embeddings=initial_embeddings)
 
-        tensor_layer = NeuralTensorLayer(rng, n_rel, dimensions, n_hidden, learning_rate=learning_rate, adagrad=adagrad)
+        tensor_layer = NeuralTensorLayer(rng, n_rel, dimensions, n_hidden, learning_rate=learning_rate, policy_class=policy_class)
 
-        output_layer = LinearScalarResponse(n_hidden, learning_rate=learning_rate, adagrad=adagrad)
+        output_layer = LinearScalarResponse(n_hidden, learning_rate=learning_rate, policy_class=policy_class)
 
         # store attributes
         self._set_attrs(n_rel=n_rel,

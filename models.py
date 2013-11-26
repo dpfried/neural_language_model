@@ -90,6 +90,9 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
         # gradient descent
         return self.policy.updates_indexed(cost, index_list, embedding_list)
 
+    def burn_in_updates(self, cost, index_list, embedding_list):
+        return []
+
     @property
     def embeddings(self):
         return self.embedding.get_value()
@@ -127,6 +130,9 @@ class LinearScalarResponse(Picklable):
 
     def updates(self, cost):
         return self.W_policy.updates(cost) + self.b_policy.updates(cost)
+
+    def burn_in_updates(self, cost):
+        return self.W_policy.burn_in_updates(cost) + self.b_policy.burn_in_updates(cost)
 
 class HiddenLayer(Picklable):
     def _nonshared_attrs(self):
@@ -206,6 +212,9 @@ class HiddenLayer(Picklable):
     def updates(self, cost):
         return self.W_policy.updates(cost) + self.b_policy.updates(cost)
 
+    def burn_in_updates(self, cost):
+        return self.W_policy.burn_in_updates(cost) + self.b_policy.burn_in_updates(cost)
+
 class ScaledBilinear(Picklable):
     def _nonshared_attrs(self):
         return [
@@ -239,6 +248,9 @@ class ScaledBilinear(Picklable):
 
     def updates(self, cost):
         return self.w_policy.updates(cost) + self.b_policy.updates(cost)
+
+    def burn_in_updates(self, cost):
+        return self.w_policy.burn_in_updates(cost) + self.b_policy.burn_in_updates(cost)
 
 class CosineSimilarity(ScaledBilinear):
     def __call__(self, x, y):
@@ -310,6 +322,10 @@ class SimilarityNN(Picklable, VectorEmbeddings):
         return self.embedding_layer.updates(cost, index_list, embedding_list)\
                 + self.similarity_layer.updates(cost)
 
+    def burn_in_updates(self, cost, index_list, embedding_list):
+        return self.embedding_layer.burn_in_updates(cost, index_list, embedding_list)\
+                + self.similarity_layer.burn_in_updates(cost)
+
     def cost(self, index_a, index_b, true_similarity):
         score, embeddings = self(index_a, index_b)
         cost = (score - true_similarity) ** 2
@@ -318,7 +334,7 @@ class SimilarityNN(Picklable, VectorEmbeddings):
     def _index_variable(self, name='index'):
         return T.lscalar(name)
 
-    def _make_training(self, cost_addition=None):
+    def _make_training(self, cost_addition=None, burn_in=False):
         index_a = self._index_variable('index_a')
         index_b = self._index_variable('index_b')
         similarity = T.scalar('true_similarity')
@@ -328,9 +344,9 @@ class SimilarityNN(Picklable, VectorEmbeddings):
             augmented_cost = cost + cost_addition(indices, embeddings)
         else:
             augmented_cost = cost
-        updates = self.updates(augmented_cost,
-                               indices,
-                               embeddings)
+
+        update_fn = self.burn_in_updates if burn_in else self.updates
+        updates = update_fn(augmented_cost, indices, embeddings)
 
         return theano.function(inputs=[index_a, index_b, similarity], outputs=[augmented_cost, cost], updates=updates, mode=self.mode)
 
@@ -417,6 +433,11 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
                 + self.hidden_layer.updates(cost)\
                 + self.output_layer.updates(cost)
 
+    def burn_in_updates(self, cost, index_list, embedding_list):
+        return self.embedding_layer.burn_in_updates(cost, index_list, embedding_list)\
+                + self.hidden_layer.burn_in_updates(cost)\
+                + self.output_layer.burn_in_updates(cost)
+
     def cost(self, correct_index_list, error_index_list):
         correct_score, correct_embeddings = self(correct_index_list)
         error_score, error_embeddings = self(error_index_list)
@@ -427,7 +448,7 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         return T.lscalars(*['%s_%d' % (basename, i)
                             for i in xrange(self.sequence_length)])
 
-    def _make_training(self, cost_addition=None):
+    def _make_training(self, cost_addition=None, burn_in=False):
         """
         compile and return symbolic theano function for training (including update of embedding and weights),
         The compiled function will take two vectors of ints, each of length
@@ -442,9 +463,9 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
             augmented_cost = cost + cost_addition(indices, embeddings)
         else:
             augmented_cost = cost
-        updates = self.updates(augmented_cost,
-                               indices,
-                               embeddings)
+
+        update_fn = self.burn_in_updates if burn_in else self.updates
+        updates = update_fn(augmented_cost, indices, embeddings)
 
         inputs = correct_indices + error_indices
         outputs = [augmented_cost, cost]
@@ -525,6 +546,10 @@ class TranslationalNN(Picklable, VectorEmbeddings):
         return self.embedding_layer.updates(cost, entity_index_list, entity_embedding_list)\
                 + self.translation_layer.updates(cost, relationship_index_list, relationship_embedding_list)
 
+    def burn_in_updates(self, cost, entity_index_list, entity_embedding_list, relationship_index_list, relationship_embedding_list):
+        return self.embedding_layer.burn_in_updates(cost, entity_index_list, entity_embedding_list)\
+                + self.translation_layer.burn_in_updates(cost, relationship_index_list, relationship_embedding_list)
+
     def cost(self,
              left_index_good, right_index_good, rel_index_good,
              left_index_bad, right_index_bad, rel_index_bad):
@@ -549,7 +574,7 @@ class TranslationalNN(Picklable, VectorEmbeddings):
     def _index_variable(self, name='index'):
         return T.lscalar(name)
 
-    def _make_training(self, cost_addition=None):
+    def _make_training(self, cost_addition=None, burn_in=False):
         left_good, left_bad, right_good, right_bad, rel_good, rel_bad = map(self._index_variable, ['left_good', 'left_bad', 'right_good', 'right_bad', 'rel_good', 'rel_bad'])
 
         cost, entity_indices, entity_embeddings, rel_indices, rel_embeddings = self.cost(left_good, right_good, rel_good,
@@ -559,9 +584,9 @@ class TranslationalNN(Picklable, VectorEmbeddings):
             augmented_cost = cost + cost_addition(entity_indices, entity_embeddings)
         else:
             augmented_cost = cost
-        updates = self.updates(cost,
-                               entity_indices, entity_embeddings,
-                               rel_indices, rel_embeddings)
+
+        update_fn = self.burn_in_updates if burn_in else self.updates
+        updates = update_fn(cost, entity_indices, entity_embeddings, rel_indices, rel_embeddings)
 
         return theano.function(inputs=[left_good, right_good, rel_good, left_bad, right_bad, rel_bad],
                                outputs=[augmented_cost, cost],

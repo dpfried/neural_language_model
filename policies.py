@@ -86,7 +86,7 @@ class VSGD(Policy):
         ]
 
     def _nonshared_attrs(self):
-        return ['param', ('n0', 100), ('C', 10), ('epsilon', 1e-3), ('burned', False)]
+        return ['param', ('n0', 100), ('C', 10), ('epsilon', 1e-20), ('burned', False)]
 
     def __repr__(self):
         return pprint.pformat({
@@ -100,7 +100,7 @@ class VSGD(Policy):
             'N': self.N.get_value(),
         })
 
-    def __init__(self, learning_rate, param, n0=100, C=10, epsilon=1e-3):
+    def __init__(self, learning_rate, param, n0=100, C=10, epsilon=1e-20):
         learning_rate = np.cast[theano.config.floatX](learning_rate)
         param_value = param.get_value()
         h_avg = np.zeros_like(param_value, dtype=theano.config.floatX)
@@ -130,17 +130,20 @@ class VSGD(Policy):
     def burn_in_updates(self, cost):
         grad = T.grad(cost, self.param)
         grad2 = hessian_diagonal(cost, self.param, grad=grad)
+        print 'burn in updates for %s' % self.param
         return [
             (self.g_avg, self.g_avg + grad),
-            (self.h_avg, self.h_avg + grad2),
+            (self.h_avg, self.h_avg + T.abs_(grad2)),
             (self.v_avg, self.v_avg + grad**2),
             (self.N, self.N + 1)
         ]
 
     def afterburn(self):
         if self.burned:
-            print 'already burned!'
+            print 'already afterburned!'
             return
+        else:
+            print 'afterburning %s' % self.param
         self.burned = True
         self.g_avg.set_value(self.g_avg.get_value() / self.N.get_value())
         hess = self.h_avg.get_value() / self.N.get_value() * self.C

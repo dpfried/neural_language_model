@@ -91,7 +91,10 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
         return self.policy.updates_indexed(cost, index_list, embedding_list)
 
     def burn_in_updates(self, cost, index_list, embedding_list):
-        return []
+        return self.policy.burn_in_updates_indexed(cost, index_list, embedding_list)
+
+    def afterburn(self):
+        self.policy.afterburn()
 
     @property
     def embeddings(self):
@@ -109,9 +112,13 @@ class LinearScalarResponse(Picklable):
         self.W_policy = policy_class(self.learning_rate, self.W)
         self.b_policy = policy_class(self.learning_rate, self.b)
 
-    def __init__(self, n_in, learning_rate=0.01, policy_class='SGD'):
+    def __init__(self, rng, n_in, learning_rate=0.01, policy_class='SGD'):
         # init the weights W as a vector of zeros
-        W_values = np.zeros((n_in,), dtype=theano.config.floatX)
+        # W_values = np.zeros((n_in,), dtype=theano.config.floatX)
+        W_values = np.asarray(rng.uniform(
+            low=-np.sqrt(6. / (n_in + 1)),
+            high=np.sqrt(6. / (n_in + 1)),
+            size=(n_in,)), dtype=theano.config.floatX)
 
         # init the basis as a scalar, 0
         b_values = np.cast[theano.config.floatX](0.0)
@@ -133,6 +140,10 @@ class LinearScalarResponse(Picklable):
 
     def burn_in_updates(self, cost):
         return self.W_policy.burn_in_updates(cost) + self.b_policy.burn_in_updates(cost)
+
+    def afterburn(self):
+        self.W_policy.afterburn()
+        self.b_policy.afterburn()
 
 class HiddenLayer(Picklable):
     def _nonshared_attrs(self):
@@ -215,6 +226,10 @@ class HiddenLayer(Picklable):
     def burn_in_updates(self, cost):
         return self.W_policy.burn_in_updates(cost) + self.b_policy.burn_in_updates(cost)
 
+    def afterburn(self):
+        self.W_policy.afterburn()
+        self.b_policy.afterburn()
+
 class ScaledBilinear(Picklable):
     def _nonshared_attrs(self):
         return [
@@ -252,6 +267,10 @@ class ScaledBilinear(Picklable):
     def burn_in_updates(self, cost):
         return self.w_policy.burn_in_updates(cost) + self.b_policy.burn_in_updates(cost)
 
+    def afterburn(self):
+        self.w_policy.afterburn()
+        self.b_policy.afterburn()
+
 class CosineSimilarity(ScaledBilinear):
     def __call__(self, x, y):
         cos_distance = T.sum(x * y, -1) / T.sqrt(T.sum(x * x, -1) * T.sum(y * y, -1))
@@ -269,7 +288,8 @@ class SimilarityNN(Picklable, VectorEmbeddings):
                 'embedding_layer',
                 'similarity_layer',
                 'dimensions',
-                'vocab_size']
+                'vocab_size',
+                ('vsgd', False)]
 
     def _initialize(self):
         self.train = self._make_training()
@@ -283,7 +303,7 @@ class SimilarityNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, policy_class='SGD', similarity_class=CosineSimilarity):
+    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, vsgd=False, similarity_class=CosineSimilarity):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -293,18 +313,19 @@ class SimilarityNN(Picklable, VectorEmbeddings):
                                          dimensions=dimensions,
                                          initial_embeddings=initial_embeddings,
                                          learning_rate=learning_rate,
-                                         policy_class=policy_class,
+                                         policy_class='SGD',
                                          )
 
         similarity_layer = similarity_class(learning_rate=learning_rate,
-                                            policy_class=policy_class)
+                                            policy_class='SGD')
 
         self._set_attrs(other_params=other_params,
                         mode=mode,
                         embedding_layer=embedding_layer,
                         similarity_layer=similarity_layer,
                         dimensions=dimensions,
-                        vocab_size=vocab_size)
+                        vocab_size=vocab_size,
+                        vsgd=vsgd)
         self._initialize()
 
 
@@ -367,7 +388,8 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
                 'output_layer',
                 'dimensions',
                 'sequence_length',
-                'vocab_size']
+                'vocab_size',
+                ('vsgd', False)]
 
     @property
     def components(self):
@@ -381,7 +403,7 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, policy_class='SGD'):
+    def __init__(self, rng, vocab_size,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, vsgd=False):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -392,17 +414,18 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
                                          dimensions=dimensions,
                                          initial_embeddings=initial_embeddings,
                                          learning_rate=learning_rate,
-                                         policy_class=policy_class)
+                                         policy_class='SGD')
 
         hidden_layer = HiddenLayer(rng=rng,
                                    n_in=dimensions * sequence_length,
                                    n_out=n_hidden,
                                    activation=T.nnet.sigmoid,
                                    learning_rate=learning_rate,
-                                   policy_class=policy_class)
+                                   policy_class='VSGD' if vsgd else 'SGD')
 
-        output_layer = LinearScalarResponse(n_in=n_hidden,
-                                            policy_class=policy_class,
+        output_layer = LinearScalarResponse(rng=rng,
+                                            n_in=n_hidden,
+                                            policy_class='SGD',
                                             learning_rate=learning_rate)
 
         self._set_attrs(n_hidden=n_hidden,
@@ -414,7 +437,8 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
                          output_layer=output_layer,
                          dimensions=dimensions,
                          sequence_length=sequence_length,
-                         vocab_size=vocab_size)
+                         vocab_size=vocab_size,
+                        vsgd=vsgd)
         self._initialize()
 
 
@@ -475,6 +499,14 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         indices = self._index_variables('index')
         score, embeddings = self(indices)
         return theano.function(inputs=indices, outputs=score, mode=self.mode)
+
+    def burn(self, data_sequence):
+        burn_fn = self._make_training(burn_in=True)
+        for datum in data_sequence:
+            burn_fn(*datum)
+        self.hidden_layer.afterburn()
+        self.output_layer.afterburn()
+        self.embedding_layer.afterburn()
 
 class TranslationalNN(Picklable, VectorEmbeddings):
     def _nonshared_attrs(self):
@@ -700,7 +732,7 @@ class TensorNN(Picklable, VectorEmbeddings):
 
         tensor_layer = NeuralTensorLayer(rng, n_rel, dimensions, n_hidden, learning_rate=learning_rate, policy_class=policy_class)
 
-        output_layer = LinearScalarResponse(n_hidden, learning_rate=learning_rate, policy_class=policy_class)
+        output_layer = LinearScalarResponse(rng=rng, n_in=n_hidden, learning_rate=learning_rate, policy_class=policy_class)
 
         # store attributes
         self._set_attrs(n_rel=n_rel,

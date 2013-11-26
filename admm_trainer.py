@@ -57,7 +57,7 @@ if __name__ == "__main__":
     parser.add_argument('--random_seed', type=int, default=1234)
     parser.add_argument('--save_model_frequency', type=int, default=10)
     parser.add_argument('--mode', default='FAST_RUN')
-    parser.add_argument('--policy_class', default='SGD')
+    parser.add_argument('--vsgd', action='store_true')
 
     # params for syntactic
     parser.add_argument('--dont_run_syntactic', action='store_true')
@@ -159,7 +159,7 @@ if __name__ == "__main__":
                                                  n_hidden=args['n_hidden'],
                                                  learning_rate=args['syntactic_learning_rate'],
                                                  mode=args['mode'],
-                                                 policy_class=args['policy_class'])
+                                                 vsgd=args['vsgd'])
 
         if args['existing_semantic_model']:
             # check to see if the model to load is itself an ADMM. if it is,
@@ -178,7 +178,7 @@ if __name__ == "__main__":
                                            dimensions=args['dimensions'],
                                            learning_rate=args['semantic_learning_rate'],
                                            mode=args['mode'],
-                                           policy_class=args['policy_class'])
+                                           vsgd=args['vsgd'])
 
 
 
@@ -218,6 +218,23 @@ if __name__ == "__main__":
     vocab_size = args['vocab_size']
     k_nearest = args['k_nearest']
 
+    def syntactic_training_data(rng=data_rng, num_to_run=None, output='syntactic', print_freq=print_freq):
+        training_block = ngram_reader.training_block(rng.random_sample())
+        block_size = training_block.shape[0]
+        for count in xrange(num_to_run or block_size):
+            if count % print_freq == 0:
+                sys.stdout.write('\r%s: ngram %d of %d' % (output, count, num_to_run or block_size))
+                sys.stdout.flush()
+            train_index = sample_cumulative_discrete_distribution(training_block[:,-1], rng=data_rng)
+            correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], rng=data_rng)
+            yield list(correct_symbols) + list(error_symbols)
+
+    if args['vsgd']:
+        # burn in syntactic
+        print 'burning syntactic'
+        model.w_trainer.burn(syntactic_training_data(rng=np.random, num_to_run=10, output='burn_in', print_freq=1))
+        print 'burn complete'
+
     while True:
         last_time = time.clock()
         model.increase_k()
@@ -230,13 +247,8 @@ if __name__ == "__main__":
             for block_num in xrange(args['syntactic_blocks_to_run']):
                 training_block = ngram_reader.training_block(data_rng.random_sample())
                 block_size = training_block.shape[0]
-                for count in xrange(block_size):
-                    if count % print_freq == 0:
-                        sys.stdout.write('\rk %i b%i: ngram %d of %d' % (model.k, block_num, count, block_size))
-                        sys.stdout.flush()
-                    train_index = sample_cumulative_discrete_distribution(training_block[:,-1], rng=data_rng)
-                    correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], rng=data_rng)
-                    augmented_cost, cost = model.update_w(*(list(correct_symbols) + list(error_symbols)))
+                for datum in syntactic_training_data(data_rng, output='k %i b %i' % (model.k, block_num)):
+                    augmented_cost, cost = model.update_w(*datum)
                     augmented_costs.append(augmented_cost)
                     costs.append(cost)
                 if args['syntactic_blocks_to_run'] > 1:

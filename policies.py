@@ -70,7 +70,6 @@ class VSGD(Policy):
 
     not used, symbolic method of finding hessians with Theano is too slow!
     better to use finite differences method?
-    also some numerical errors.
     """
     def _shared_attrs(self):
         return [

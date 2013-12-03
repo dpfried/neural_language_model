@@ -635,7 +635,7 @@ class NeuralTensorLayer(Picklable):
         return ['W', 'V', 'b']
 
     def _nonshared_attrs(self):
-        return ['n_rel', 'n_in', 'n_out', 'activation', 'learning_rate', 'policy_class']
+        return ['n_rel', 'n_in', 'n_out', 'activation', 'learning_rate', ('policy_class', 'SGD')]
 
     def _initialize(self):
         policy_class = eval(self.policy_class)
@@ -677,6 +677,8 @@ class NeuralTensorLayer(Picklable):
                         activation=activation,
                         policy_class=policy_class,
                         learning_rate=learning_rate)
+
+        self._initialize()
 
     def __call__(self, x1, x2, relation_index):
         """

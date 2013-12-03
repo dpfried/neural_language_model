@@ -45,7 +45,6 @@ if __name__ == "__main__":
     parser.add_argument('--random_seed', type=int, default=1234)
     parser.add_argument('--save_model_frequency', type=int, default=10)
     parser.add_argument('--mode', default='FAST_RUN')
-    parser.add_argument('--adagrad', action='store_true')
 
     # params for syntactic
     parser.add_argument('--dont_run_syntactic', action='store_true')
@@ -164,7 +163,7 @@ if __name__ == "__main__":
                                                  n_hidden=args['n_hidden'],
                                                  learning_rate=args['syntactic_learning_rate'],
                                                  mode=args['mode'],
-                                                 adagrad=args['adagrad'])
+                                                 )
 
         if args['existing_semantic_model']:
             # check to see if the model to load is itself an ADMM. if it is,
@@ -186,7 +185,6 @@ if __name__ == "__main__":
                 'dimensions': args['dimensions'],
                 'learning_rate': args['semantic_learning_rate'],
                 'mode': args['mode'],
-                'adagrad': args['adagrad']
             }
             if args['model_class'] == 'TensorNN':
                 semantic_args['n_hidden'] = args['semantic_tensor_n_hidden']

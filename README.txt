@@ -26,3 +26,5 @@ policies.py - gradient descent schedules
 corpus_creator.py - build an hd5 file from Berkeley format corpus
 
 dump_wordnet_similarities.py - used to dump the pairwise similarities needed by admm_trainer.py
+
+ngrams.py - used to read an hd5 file created by corpus_creator.py

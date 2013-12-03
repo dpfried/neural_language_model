@@ -6,3 +6,4 @@
 tSNE_linux
 build/
 *.npy
+models/

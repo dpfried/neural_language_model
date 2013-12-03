@@ -3,7 +3,6 @@
 *.pkl.gz
 *.so
 *.pkl
-*.txt
 tSNE_linux
 build/
 *.npy

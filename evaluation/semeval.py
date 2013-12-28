@@ -6,10 +6,7 @@ import numpy as np
 from query import  make_analogy_fns, get_vocab_container
 import gzip, cPickle
 import tempfile
-from model import _default_word
-# from semantic_network import *
-from admm import *
-# from joint import *
+from models import *
 import re
 
 def attr_dict(filename):

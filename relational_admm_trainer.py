@@ -200,8 +200,10 @@ if __name__ == "__main__":
                      other_params=args,
                      mode=args['mode'])
 
-    def save_model():
-        fname = os.path.join(args['base_dir'], 'model-%d.pkl.gz' % model.k)
+    def save_model(filename=None):
+        if filename is None:
+            filename = 'model-%d.pkl.gz' % model.k
+        fname = os.path.join(args['base_dir'], filename)
         sys.stdout.write('dumping model to %s' % fname)
         sys.stdout.flush()
         with gzip.open(fname, 'wb') as f:
@@ -245,6 +247,11 @@ if __name__ == "__main__":
                     train_index = sample_cumulative_discrete_distribution(training_block[:,-1], rng=data_rng)
                     correct_symbols, error_symbols, ngram_frequency = ngram_reader.contrastive_symbols_from_row(training_block[train_index], rng=data_rng)
                     augmented_cost, cost = model.update_w(*(list(correct_symbols) + list(error_symbols)))
+                    if not np.isfinite(cost):
+                        print 'single nan detected'
+                        save_model('nan_dump.pkl.gz')
+                        import IPython
+                        IPython.embed()
                     augmented_costs.append(augmented_cost)
                     costs.append(cost)
                 if args['syntactic_blocks_to_run'] > 1:
@@ -252,6 +259,11 @@ if __name__ == "__main__":
                     print  '%i intermediate mean %f' % (block_num, np.mean(costs[-block_size:]))
 
             print
+            if not np.isfinite(np.mean(costs)):
+                print 'nan cost mean detected'
+                save_model('nan_dump.pkl.gz')
+                import IPython
+                IPython.embed()
             stats_for_k['syntactic_mean'] = np.mean(costs)
             stats_for_k['syntactic_std'] = np.std(costs)
             print 'training:'
@@ -322,6 +334,11 @@ if __name__ == "__main__":
                             rel_index_new = data_rng.randint(N_relationships)
 
                     augmented_cost, cost = model.update_v(word_a, word_b, rel_index, word_a_new, word_b_new, rel_index_new)
+                    if not np.isfinite(cost):
+                        print 'nan detected'
+                        save_model('nan_dump.pkl.gz')
+                        import IPython
+                        IPython.embed()
                     costs.append(cost)
                     augmented_costs.append(augmented_cost)
 
@@ -333,6 +350,11 @@ if __name__ == "__main__":
                     print
                     print  '%i intermediate mean %f' % (block_num, np.mean(costs[-block_size:]))
             print
+            if not np.isfinite(np.mean(costs)):
+                print 'nan cost mean detected'
+                save_model('nan_dump.pkl.gz')
+                import IPython
+                IPython.embed()
             stats_for_k['semantic_mean'] = np.mean(costs)
             stats_for_k['semantic_std'] = np.std(costs)
             print 'semantic mean cost \t%f' % stats_for_k['semantic_mean']

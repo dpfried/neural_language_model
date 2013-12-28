@@ -689,7 +689,7 @@ class NeuralTensorLayer(Picklable):
         """
         # get the relationship embeddings
         W_rel, V_rel, b_rel = self.W[relation_index], self.V[relation_index], self.b[relation_index]
-        return T.dot(T.dot(x1, W_rel), x2) + T.dot(V_rel, T.concatenate([x1, x2])) + b_rel, [W_rel], [V_rel], [b_rel]
+        return self.activation(T.dot(T.dot(x1, W_rel), x2) + T.dot(V_rel, T.concatenate([x1, x2])) + b_rel), [W_rel], [V_rel], [b_rel]
 
     def updates(self, cost, relation_index_list, W_rel_list, V_rel_list, b_rel_list):
         """
@@ -817,7 +817,7 @@ class TensorNN(Picklable, VectorEmbeddings):
         return theano.function(inputs=[left, right, rel], outputs=score, mode=self.mode)
 
 
-class ADMM(Picklable):
+class ADMM(Picklable, VectorEmbeddings):
     def _admm_cost(self, side='w'):
         if side == 'w':
             other_model = self.v_trainer

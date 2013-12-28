@@ -104,6 +104,8 @@ if __name__ == "__main__":
 
         model_loaded = True
         args = model.other_params
+        if 'vsgd' not in args:
+            args['vsgd'] = False
         # rewrite in case we've copied the model file into this folder
         args['base_dir'] = base_dir
     else:

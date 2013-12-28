@@ -26,7 +26,6 @@ def make_comparison_function(model_directories, model_number=None):
 
 
 if __name__ == "__main__":
-    import arg
     base = '/cl/work/dfried/models/adagrad/'
     distance_comparison, distance_num = make_comparison_function([base + 'only_syntactic/no_adagrad', base + 'only_semantic/no_adagrad', base + 'no_init_0.01/no_adagrad'])
     # translational_compariso, translational_num  = make_comparison_function([base + 'only_syntactic/no_adagrad', base + 'relational_only_semantic/no_adagrad', base + 'relational_no_init_0.01/no_adagrad'])

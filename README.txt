@@ -1,3 +1,6 @@
+virtualenv:
+source /home/dfried/.virtualenvs/ufldl/bin/activate
+
 files you can actually run:
 ==========================
 admm_trainer.py - used to train ADMM using distance in wordnet

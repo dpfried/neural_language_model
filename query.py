@@ -18,11 +18,11 @@ def get_vocab_container(model):
 def cosine_similarity(a, b):
     return 1 - cosine(a, b)
 
-def make_analogy_fns(model, vocab_container):
+def make_analogy_fns(embeddings, vocab_container):
     def index(word):
         return vocab_container.symbol_to_index[word]
     def analogy_fn(word1, word2):
-        return model.embeddings[index(word2.lower())] - model.embeddings[index(word1.lower())]
+        return embeddings[index(word2.lower())] - embeddings[index(word1.lower())]
     def choose_best(reference_analogy, other_pairs):
         # reference_analogy = analogy_fn(word1, word2)
         other_analogies = [analogy_fn(w1.lower(), w2.lower()) for (w1, w2) in other_pairs]

@@ -17,10 +17,13 @@ def make_series(model_root_folder,
                 plot_interval=100,
                 limit=None,
                 no_new=False,
+                average_embeddings=False,
                 **run_model_args):
-    include_synsets = None
-    normalize_components=False
-    store_fname = join(model_root_folder, 'eval-%s-%s.pkl' % (include_synsets, normalize_components))
+    if average_embeddings:
+        suffix = 'eval-averaged.pkl'
+    else:
+        suffix = 'eval-None-False.pkl' # holdout from when we had include_synsets and normalize_components
+    store_fname = join(model_root_folder, suffix)
     try:
         stats = pandas.read_pickle(store_fname)
     except:
@@ -57,27 +60,28 @@ def make_series(model_root_folder,
         # load the vocabulary if not already cached
         if not vocab_container:
             vocab_container = get_vocab_container(model)
-        this_stats = run_model(model, vocab_container,  **run_model_args)
+        embeddings = model.embeddings if not average_embeddings else model.averaged_embeddings()
+        this_stats = run_model(embeddings, vocab_container,  **run_model_args)
         stats = pandas.concat([stats, pandas.DataFrame([this_stats], index=[n])]).sort()
         stats.to_pickle(store_fname)
     return stats
 
-def run_model(model, vocab_container,
+def run_model(embeddings, vocab_container,
               grefenstette_verb_file='/home/dfried/code/verb_disambiguation',
               semeval_root="/home/dfried/code/semeval",
               wordsim_root="/home/dfried/data/wordsim/combined.csv",
               **kwargs):
     stats = {}
-    stats['grefenstette_rho'], _ = grefenstette.run(model,
+    stats['grefenstette_rho'], _ = grefenstette.run(embeddings,
                                                     vocab_container,
                                                     grefenstette_verb_file)
 
     stats['semeval_correlation'], stats['semeval_accuracy'] \
-            = semeval.run(model,
+            = semeval.run(embeddings,
                           vocab_container,
                           semeval_root)
 
-    stats['wordsim_rho'], _ = wordsim.run(model,
+    stats['wordsim_rho'], _ = wordsim.run(embeddings,
                                           vocab_container,
                                           wordsim_root)
 
@@ -99,6 +103,7 @@ if __name__ == "__main__":
     parser.add_argument('--limit', type=int, default=None)
     parser.add_argument('--no_new', action='store_true')
     parser.add_argument('--save_graphs_base')
+    parser.add_argument('--average_embeddings', action='store_true')
     args = parser.parse_args()
 
     import config

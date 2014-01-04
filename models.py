@@ -904,12 +904,31 @@ class ADMM(Picklable, VectorEmbeddings):
                                mode=self.mode)
 
     @property
+    def include_syntactic(self):
+        return not ('dont_run_syntactic' in self.other_params and self.other_params['dont_run_syntactic'])
+
+    @property
+    def include_semantic(self):
+        return not ('dont_run_semantic' in self.other_params and self.other_params['dont_run_semantic'])
+
+    @property
     def embeddings(self):
-        include_syntactic = not ('dont_run_syntactic' in self.other_params and self.other_params['dont_run_syntactic'])
-        include_semantic = not ('dont_run_semantic' in self.other_params and self.other_params['dont_run_semantic'])
-        if include_syntactic and include_semantic:
+        if self.include_syntactic and self.include_semantic:
             return np.concatenate((self.w_trainer.embeddings, self.v_trainer.embeddings), 1)
-        elif include_syntactic:
+        elif self.include_syntactic:
+            return self.w_trainer.embeddings
+        else:
+            return self.v_trainer.embeddings
+
+    def averaged_embeddings(self):
+        if self.include_syntactic and self.include_semantic:
+            # average the embeddings in the intersection, and return syntactic
+            # embeddings for the others
+            avg_embeddings = self.w_trainer.embeddings.copy()
+            avg_embeddings[self.indices_in_intersection] += self.v_trainer.embeddings[self.indices_in_intersection]
+            avg_embeddings[self.indices_in_intersection] /= 2
+            return avg_embeddings
+        elif self.include_syntactic:
             return self.w_trainer.embeddings
         else:
             return self.v_trainer.embeddings

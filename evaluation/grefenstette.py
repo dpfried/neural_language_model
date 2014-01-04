@@ -22,12 +22,12 @@ def make_verb_applicability_fn(get_embedding_fn):
                           verb_applicability(verb2, noun1, noun2))
     return verb_applicability, compare_verbs
 
-def run(model, vocab_container, verb_file):
+def run(embeddings, vocab_container, verb_file):
     parsed_lines = parse_file(verb_file)
 
     def get_embedding(word):
         index = vocab_container.symbol_to_index[word]
-        return model.embeddings[index]
+        return embeddings[index]
 
     verb_applicability, compare_verbs = make_verb_applicability_fn(get_embedding)
 
@@ -51,12 +51,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model_file')
     parser.add_argument('--verb_file', default='/home/dfried/code/verb_disambiguation')
+    parser.add_argument('--average_embeddings', action='store_true')
     args = parser.parse_args()
 
     with gzip.open(args.model_file) as f:
         model = cPickle.load(f)
     vocab_container = get_vocab_container(model)
 
-    rho, p = run(model, vocab_container, args.verb_file)
+    rho, p = run(model.embeddings, vocab_container, args.verb_file)
 
     print 'rho: %f\tp: %f' % (rho, p)

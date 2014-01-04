@@ -8,9 +8,9 @@ from query import get_vocab_container
 
 from scipy.stats import spearmanr
 
-def run(model, vocab_container, wordsim_root):
+def run(embeddings, vocab_container, wordsim_root):
     def get_embedding(word):
-        return model.embeddings[vocab_container.symbol_to_index[word]]
+        return embeddings[vocab_container.symbol_to_index[word]]
         # return model.get_embedding(word, include_synsets=include_synsets, normalize_components=normalize_components)
 
     with open(wordsim_root) as csvfile:
@@ -42,6 +42,6 @@ if __name__ == "__main__":
 
     vocab_container = get_vocab_container(model)
 
-    rho, p = run(model, vocab_container, args.wordsim_root)
+    rho, p = run(model.embeddings, vocab_container, args.wordsim_root)
 
     print 'rho: %f\tp: %f' % (rho, p)

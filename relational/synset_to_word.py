@@ -22,6 +22,9 @@ class SynsetToWord(object):
             words.update(self.words_by_synset[syn_b])
         return words
 
+    def usable(self, syn):
+        return bool(self.words_by_synset[syn])
+
 if __name__ == "__main__":
     rels = Relationships()
     import ngrams

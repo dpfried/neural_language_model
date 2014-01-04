@@ -31,8 +31,8 @@ def get_examples(answer_file):
     with open(answer_file) as f:
         return [line.strip().strip('"').split(':') for line in f]
 
-def run(model, vocab_container,  semeval_root):
-    analogy_fn, choose_best = make_analogy_fns(model,
+def run(embeddings, vocab_container,  semeval_root):
+    analogy_fn, choose_best = make_analogy_fns(embeddings,
                                                vocab_container,
                                                )
 
@@ -128,7 +128,7 @@ if __name__ == "__main__":
 
     vocab_container = get_vocab_container(model)
 
-    mean_cor, mean_acc = run(model, vocab_container, args.semeval_root)
+    mean_cor, mean_acc = run(model.embeddings, vocab_container, args.semeval_root)
 
     print 'average correlation: %f' % mean_cor
     print 'average accuracy: %f' % mean_acc

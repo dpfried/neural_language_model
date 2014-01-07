@@ -36,9 +36,16 @@ def top_indices_from_distances(distances, index_to_symbol, n=10):
     print top_indices
     return [(index_to_symbol[i], distances[i]) for i in top_indices]
 
-def query(model, vocab_container, word, n=10):
+def query_embeddings(embeddings, vocab_container, word, n=10):
     index = vocab_container.symbol_to_index[word]
-    embeddings = model.embeddings
     this_embedding = embeddings[index]
     distances = cdist(this_embedding[np.newaxis,:], embeddings, 'cosine').flatten()
     return top_indices_from_distances(distances, vocab_container.index_to_symbol, n=n)
+
+def query(model, vocab_container, word, n=10):
+    embeddings = model.embeddings
+    return query_embeddings(embeddings, vocab_container, word, n=n)
+
+def averaged_query(model, vocab_container, word, n=10):
+    embeddings = model.averaged_embeddings()
+    return query_embeddings(embeddings, vocab_container, word, n=n)

@@ -4,13 +4,15 @@ import random
 from functional import mapcan
 import numpy as np
 
+# names of L{Synset} methods that return other synsets
+relationship_methods = ['hypernyms', 'instance_hypernyms', 'hyponyms', 'instance_hyponyms',
+                        'member_holonyms', 'substance_holonyms', 'part_holonyms',
+                        'member_meronyms', 'substance_meronyms', 'part_meronyms',
+                        'attributes', 'entailments', 'causes', 'also_sees', 'verb_groups',
+                        'similar_tos']
+
 class Relationships(object):
-    # names of L{Synset} methods that return other synsets
-    relationships = ['hypernyms', 'instance_hypernyms', 'hyponyms', 'instance_hyponyms',
-                     'member_holonyms', 'substance_holonyms', 'part_holonyms',
-                     'member_meronyms', 'substance_meronyms', 'part_meronyms',
-                     'attributes', 'entailments', 'causes', 'also_sees', 'verb_groups',
-                     'similar_tos']
+    relationships = relationship_methods
 
     def __init__(self, seed=1234):
         self.synsets = list(wn.all_synsets())

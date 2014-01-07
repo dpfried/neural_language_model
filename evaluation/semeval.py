@@ -6,7 +6,6 @@ import numpy as np
 from query import  make_analogy_fns, get_vocab_container
 import gzip, cPickle
 import tempfile
-from models import *
 import re
 
 def attr_dict(filename):

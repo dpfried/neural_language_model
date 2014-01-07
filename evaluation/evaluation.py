@@ -24,10 +24,13 @@ def make_series(model_root_folder,
     else:
         suffix = 'eval-None-False.pkl' # holdout from when we had include_synsets and normalize_components
     store_fname = join(model_root_folder, suffix)
+    print store_fname
     try:
         stats = pandas.read_pickle(store_fname)
+        print "read pickle from %s" % store_fname
     except:
         stats = pandas.DataFrame()
+        print 'created new frame'
     if no_new:
         return stats
 
@@ -119,6 +122,28 @@ if __name__ == "__main__":
         print name
         print s
 
+    stat_params = {
+        'grefenstette_rho': {
+            'title': "Grefenstette",
+        },
+        'semeval_accuracy': {
+            'title': "SemEval Accuracy",
+        },
+        'semeval_correlation': {
+            'title': "SemEval Correlation",
+        },
+        'wordsim_rho': {
+            'title': "WordSim",
+        },
+    }
+
+    ys = {
+        'grefenstette_rho': '$\\rho$',
+        'semeval_accuracy': 'accuracy',
+        'semeval_correlation': '$\\rho$',
+        'wordsim_rho': '$\\rho$',
+    }
+
     # for printing the names of models
     common_prefix = os.path.commonprefix(args.model_directories)
     def suffix(model_directory):
@@ -140,7 +165,10 @@ if __name__ == "__main__":
                 to_plot = data[stat_name]
                 if args.limit:
                     to_plot = to_plot[to_plot.index <= args.limit]
-                to_plot.plot(label=suffix(model_directory), style=style)
+                to_plot.plot(label=suffix(model_directory), style=style, **stat_params[stat_name])
+                plt.xlabel('training iterations')
+                plt.ylabel(ys[stat_name])
+                plt.subplots_adjust(bottom=0.15)
             except Exception as e:
                 print 'exception'
                 print stat_name, model_directory
@@ -152,3 +180,15 @@ if __name__ == "__main__":
         if args.save_graphs_base:
             plt.savefig('%s_%s.pdf' % (args.save_graphs_base, stat_name), bbox_inches='tight')
     plt.show()
+    max_index = max(reduce(lambda p, q: set(p).intersection(set(q)),
+                           map(lambda s: s.index, all_stats.values())))
+    if args.limit and max_index > args.limit:
+        max_index = args.limit
+    data = pandas.DataFrame({
+        path.split('/')[-1]: frame.ix[max_index]
+        for path, frame in all_stats.iteritems()
+    })
+    print 'evaluated at iteration %d:' % max_index
+    print data.transpose().to_latex(float_format=lambda f: "%0.2f" % f)
+    # import IPython
+    # IPython.embed()

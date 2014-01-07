@@ -1,7 +1,6 @@
 import csv
 from scipy.spatial.distance import cosine
 import gzip, cPickle
-from models import *
 # from semantic_network import *
 # from admm import *
 from query import get_vocab_container

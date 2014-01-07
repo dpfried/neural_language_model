@@ -1,7 +1,6 @@
 from scipy.spatial.distance import cosine
 import gzip, cPickle
 from scipy.stats import spearmanr
-from models import *
 from query import get_vocab_container
 
 def parse_line(line):

@@ -12,7 +12,8 @@ from utils import models_in_folder
 import random
 import theano
 from os.path import join
-from relational.synset_to_word import Relationships, SynsetToWord
+# from relational.synset_to_word import Relationships, SynsetToWord
+from relational.wordnet_rels import RelationshipsNTNDataset
 
 theano.config.exception_verbosity = 'high'
 
@@ -98,19 +99,14 @@ if __name__ == "__main__":
         with open(os.path.join(args['base_dir'], 'params.json'), 'w') as f:
             json.dump(args, f)
 
-    relationship_path = join(base_dir, 'relationships.pkl.gz')
-    try:
-        with gzip.open(relationship_path) as f:
-            relationships = cPickle.load(f)
-        print 'loaded relationships from %s' % relationship_path
-    except:
-        relationships = Relationships()
-        print 'saving relationships to %s' % relationship_path
-        with gzip.open(relationship_path, 'wb') as f:
-            cPickle.dump(relationships, f)
-
-    N_relationships = len(relationships.relationships)
+    # N_relationships = len(relationships.relationships)
     replacement_column_index = args['sequence_length'] / 2
+
+    rng = np.random.RandomState(args['random_seed'])
+    data_rng = np.random.RandomState(args['random_seed'])
+    validation_rng = np.random.RandomState(args['random_seed'] + 1)
+    random.seed(args['random_seed'])
+
 
     # set up syntactic
     ngram_reader = NgramReader(args['ngram_filename'], vocab_size=args['vocab_size'], train_proportion=args['train_proportion'], test_proportion=args['test_proportion'])
@@ -119,24 +115,33 @@ if __name__ == "__main__":
     print 'corpus contains %i ngrams' % (ngram_reader.number_of_ngrams)
 
     # set up semantic
-    num_semantic_training = int(relationships.N * 0.98)
-    semantic_training = relationships.data[:num_semantic_training]
-    semantic_testing = relationships.data[num_semantic_training:]
+    # num_semantic_training = int(relationships.N * 0.98)
+    # semantic_training = relationships.data[:num_semantic_training]
+    # semantic_testing = relationships.data[num_semantic_training:]
 
-    rng = np.random.RandomState(args['random_seed'])
-    data_rng = np.random.RandomState(args['random_seed'])
-    validation_rng = np.random.RandomState(args['random_seed'] + 1)
-    random.seed(args['random_seed'])
+    relationship_path = join(base_dir, 'relationships.pkl.gz')
+    try:
+        with gzip.open(relationship_path) as f:
+            relationships = cPickle.load(f)
+        print 'loaded relationships from %s' % relationship_path
+    except:
+        # relationships = Relationships()
+        relationships = RelationshipsNTNDataset(vocabulary, data_rng)
+        print 'saving relationships to %s' % relationship_path
+        with gzip.open(relationship_path, 'wb') as f:
+            cPickle.dump(relationships, f)
 
-    print 'constructing synset to word'
-    synset_to_words = SynsetToWord(vocabulary)
-    print '%d of %d synsets have no words!' % (sum(not names for names in synset_to_words.words_by_synset.values()), len(synset_to_words.words_by_synset))
+
+    # print 'constructing synset to word'
+    # synset_to_words = SynsetToWord(vocabulary)
+    # print '%d of %d synsets have no words!' % (sum(not names for names in synset_to_words.words_by_synset.values()), len(synset_to_words.words_by_synset))
 
     if not args['dont_run_semantic']:
         print 'loading semantic similarities'
         print 'computing terms with semantic distance'
-        indices_in_intersection = set(i for i in synset_to_words.all_words_in_relations(relationships)
-                                      if i != 0) # exclude the rare word if it is somehow present
+        # indices_in_intersection = set(i for i in synset_to_words.all_words_in_relations(relationships)
+        #                               if i != 0) # exclude the rare word if it is somehow present
+        indices_in_intersection = relationships.indices_in_intersection
     else:
         indices_in_intersection = set()
 
@@ -291,31 +296,31 @@ if __name__ == "__main__":
             augmented_costs = []
             costs = []
             for block_num in xrange(args['semantic_blocks_to_run']):
-                skip_count = 0
-                block_size = semantic_training.shape[0]
-                for i in xrange(block_size):
+                # block_size = semantic_training.shape[0]
+                block_size = relationships.N
+                for i, (word_a, rel_index, word_b) in relationships.training_block():
+                # for i in xrange(block_size):
                     if i % print_freq == 0:
                         sys.stdout.write('\r k %i: pair : %d / %d' % (model.k, i, block_size))
                         sys.stdout.flush()
 
-                    row = semantic_training[data_rng.choice(block_size)]
+                    # row = semantic_training[data_rng.choice(block_size)]
 
-                    # get a tuple of entity, entity, relation indices
-                    a_index, b_index, rel_index = row
-                    # get the synsets for each index
-                    synset_a, synset_b, rel = relationships.indices_to_symbolic(row)
-                    # for each synset, get indices of words in the vocabulary
-                    # associated with the synset
-                    words_a = synset_to_words.words_by_synset[synset_a]
-                    words_b = synset_to_words.words_by_synset[synset_b]
-                    # if there aren't any for either, on to the next training
-                    # example
-                    if not words_a or not words_b:
-                        skip_count += 1
-                        continue
+                    # # get a tuple of entity, entity, relation indices
+                    # a_index, b_index, rel_index = row
+                    # # get the synsets for each index
+                    # synset_a, synset_b, rel = relationships.indices_to_symbolic(row)
+                    # # for each synset, get indices of words in the vocabulary
+                    # # associated with the synset
+                    # words_a = synset_to_words.words_by_synset[synset_a]
+                    # words_b = synset_to_words.words_by_synset[synset_b]
+                    # # if there aren't any for either, on to the next training
+                    # # example
+                    # if not words_a or not words_b:
+                    #     continue
                     # otherwise, randomly choose one and train on it
-                    word_a = data_rng.choice(words_a)
-                    word_b = data_rng.choice(words_b)
+                    # word_a = data_rng.choice(words_a)
+                    # word_b = data_rng.choice(words_b)
 
                     word_a_new, word_b_new, rel_index_new = word_a, word_b, rel_index
 
@@ -331,7 +336,8 @@ if __name__ == "__main__":
                             word_b_new = sample_cumulative_discrete_distribution(ngram_reader.cumulative_word_frequencies, rng=data_rng)
                     elif to_mod == 2:
                         while rel_index_new == rel_index:
-                            rel_index_new = data_rng.randint(N_relationships)
+                            # rel_index_new = data_rng.randint(N_relationships)
+                            rel_index_new = data_rng.randint(relationships.N_relationships)
 
                     augmented_cost, cost = model.update_v(word_a, word_b, rel_index, word_a_new, word_b_new, rel_index_new)
                     if not np.isfinite(cost):

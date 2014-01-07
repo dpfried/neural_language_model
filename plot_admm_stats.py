@@ -88,19 +88,22 @@ if __name__ == "__main__":
             syn_w = .5
             sem_w = .5
         return syn_w * frame.syntactic_mean + sem_w * frame.semantic_mean
-    for plot_tile, fn in [
-        ("Total loss (semantic + syntactic)", total_loss),
-        ("Y-norm (pseudo avg)", lambda frame, _: frame.y_norm / (np.sqrt(50000.))),
-        ("residual norm (pseudo avg)", lambda frame, _: frame.res_norm / (np.sqrt(50000.))),
-        ("total loss (augmented)", lambda frame, _: frame.semantic_mean_augmented + frame.syntactic_mean_augmented),
-        ("syntactic loss", lambda frame, _: frame.syntactic_mean),
-        ("semantic loss", lambda frame, _: frame.semantic_mean),
-        ("syntactic validation mean score", lambda frame, _: frame.syntactic_validation_mean_score),
-        ("semantic validation mean jaccard", lambda frame, _: frame.semantic_validation_mean_jaccard),
+    for plot_tile, fn, ylbl in [
+        ("NLM loss + WordNet loss", total_loss, 'loss'),
+        ("Mean $||\mathbf{y}_i||_2$", lambda frame, _: frame.y_norm, 'mean norm'),
+        ("Mean $||\mathbf{w}_i - \mathbf{v}_i||_2$", lambda frame, _: frame.res_norm, 'mean norm'),
+        ("Total loss (augmented)", lambda frame, _: frame.semantic_mean_augmented + frame.syntactic_mean_augmented, 'loss'),
+        ("NLM loss", lambda frame, _: frame.syntactic_mean, 'loss'),
+        ("WordNet loss", lambda frame, _: frame.semantic_mean, 'loss'),
+        # ("syntactic validation mean score", lambda frame, _: frame.syntactic_validation_mean_score),
+        # ("semantic validation mean jaccard", lambda frame, _: frame.semantic_validation_mean_jaccard),
     ]:
         try:
             plt.figure()
             plt.title(plot_tile)
+            plt.xlabel('training iterations')
+            plt.ylabel(ylbl)
+            plt.subplots_adjust(bottom=0.2)
             # for printing the names of models
             common_prefix = os.path.commonprefix(args.model_directories)
             def suffix(model_directory):

@@ -4,6 +4,8 @@ from collections import defaultdict
 
 import nltk
 
+default_filename = '/home/dfried/naist/Wordnet/train.txt'
+
 ## operates on the Wordnet relation dataset available at Richard Socher's website, http://www.socher.org/index.php/Main/ReasoningWithNeuralTensorNetworksForKnowledgeBaseCompletion
 ## we need to map the entity tokens in the dataset to NLTK Synsets, and the relationship tokens in the dataset to Synset method names
 
@@ -28,18 +30,22 @@ def parse_synset_token(name):
     tokens = name.split('_')[2:]
     return '_'.join(tokens[:-1]), int(tokens[-1])
 
-def resolve_file(filename='/home/dfried/naist/Wordnet/train.txt'):
+def read_lines(filename=default_filename):
+    with open(filename) as f:
+        return list(map(lambda s: s.rstrip().split(), f))
+
+def resolve_file(filename=default_filename):
     '''
     Run entity and relationship resolution on the Socher et al training dataset, returning one to many mapping dictionaries.
     Warning: if a relation or synset can't be resolved, it won't be present in the dictionary, so these are not total functions
 
+    @return lines: a list of [entity_a_token, relation_token, entity_b_token] lists
     @return rel_map: maps relation tokens from the dataset to sets of NLTK Synset method names
     @return syn_map: maps entity tokens from the dataset to sets of NLTK Synsets
     '''
-    with open(filename) as f:
-        lines = list(map(lambda s: s.rstrip().split(), f))
+    lines = read_lines(filename)
     rel_map = resolve_relationships(lines)
-    return rel_map, resolve_synsets(lines, rel_map)
+    return lines, rel_map, resolve_synsets(lines, rel_map)
 
 def resolve_relationships(lines):
     rel_map = defaultdict(nltk.FreqDist)

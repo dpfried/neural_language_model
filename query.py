@@ -26,7 +26,7 @@ def make_analogy_fns(embeddings, vocab_container):
     def choose_best(reference_analogy, other_pairs):
         # reference_analogy = analogy_fn(word1, word2)
         other_analogies = [analogy_fn(w1.lower(), w2.lower()) for (w1, w2) in other_pairs]
-        scores = [cosine_similarity(reference_analogy, other) for other in other_analogies]
+        scores = np.nan_to_num([cosine_similarity(reference_analogy, other) for other in other_analogies])
         return list(reversed(sorted(zip(scores, other_pairs))))
     return analogy_fn, choose_best
 

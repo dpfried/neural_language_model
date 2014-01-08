@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import pandas
 import subprocess
 import os
 from glob import glob
@@ -7,6 +8,8 @@ from query import  make_analogy_fns, get_vocab_container
 import gzip, cPickle
 import tempfile
 import re
+
+DEFAULT_SEMEVAL_ROOT = "/home/dfried/code/semeval"
 
 def attr_dict(filename):
     with open(filename) as f:
@@ -30,7 +33,17 @@ def get_examples(answer_file):
     with open(answer_file) as f:
         return [line.strip().strip('"').split(':') for line in f]
 
-def run(embeddings, vocab_container,  semeval_root):
+def category_names(filename=os.path.join(DEFAULT_SEMEVAL_ROOT, 'subcategories-list.txt')):
+    def parse_line(line):
+        '''
+        "1, a, CLASS-INCLUSION, Taxonomic" -> "1a, (CLASS-INCLUSION, Taxonomic)"
+        '''
+        tokens = [s.strip() for s in line.split(',')]
+        return (tokens[0] + tokens[1]), (tokens[2], tokens[3])
+    with open(filename) as f:
+        return dict(parse_line(line) for line in f)
+
+def run(embeddings, vocab_container,  semeval_root=DEFAULT_SEMEVAL_ROOT):
     analogy_fn, choose_best = make_analogy_fns(embeddings,
                                                vocab_container,
                                                )
@@ -60,11 +73,16 @@ def run(embeddings, vocab_container,  semeval_root):
     def maxdiff_results_path(suffix):
         return os.path.join(output_folder, 'MaxDiffResults-%s.txt' % suffix)
 
+    cat_names = category_names(os.path.join(semeval_root, 'subcategories-list.txt'))
+    results = []
     for semeval_data_folder, sets_to_run in sets_by_folder.items():
         # only test on testing
         for s in sets_to_run:
             # print '-------'
             # print s
+            data = {}
+            data['key'] = s
+            data['category'], data['name'] = cat_names[s]
 
             answer_file = os.path.join(semeval_data_folder, 'Phase1Answers', 'Phase1Answers-%s.txt' % s)
             question_file = os.path.join(semeval_data_folder, 'Phase1Questions', 'Phase1Questions-%s.txt' % s)
@@ -77,6 +95,9 @@ def run(embeddings, vocab_container,  semeval_root):
             average_paradigm = sum(paradigm_analogies) / len(paradigm_analogies)
 
             rankings = choose_best(average_paradigm, examples)
+            data['number_paradigms'] = len(paradigms)
+            data['number_testing'] = len(examples)
+
             min_score = min(score for score, pair in rankings)
             # print rankings
             with open(nlm_scaled_path(s), 'w') as f:
@@ -106,12 +127,21 @@ def run(embeddings, vocab_container,  semeval_root):
                              maxdiff_results_path(s)],
                             stdout=open(os.devnull, 'wb'))
 
-    # compute average correlation
-    corrs = [parse_correlation(filename) for filename in glob(spearman_results_path('*'))]
-    # compute average accuracy
-    accuracy = [parse_accuracy(filename) for filename in glob(maxdiff_results_path('*'))]
+            data['rho'] = parse_correlation(spearman_results_path(s))
+            data['accuracy'] = parse_accuracy(maxdiff_results_path(s))
 
-    return np.mean(corrs), np.mean(accuracy)
+            results.append(data)
+
+    data = pandas.DataFrame(results).set_index('key')
+
+    # compute average correlation
+    # corrs = { filename:parse_correlation(filename) for filename in glob(spearman_results_path('*')) }
+    # # compute average accuracy
+    # accuracy = { filename:parse_accuracy(filename) for filename in glob(maxdiff_results_path('*')) }
+    # assert np.abs(np.mean(corrs.values()) - data.rho.mean()) < 1e-5
+    # assert np.abs(np.mean(accuracy.values()) - data.accuracy.mean()) < 1e-5
+
+    return data.rho.mean(), data.accuracy.mean(), data
 
 
 if __name__ == "__main__":
@@ -119,7 +149,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model', help="model file to be used for semeval.py script")
     # parser.add_argument('--output_folder', help="folder to write results to", default="/home/dfried/code/nlm/semeval/junk")
-    parser.add_argument('--semeval_root', help="folder containing semeval data", default="/home/dfried/code/semeval")
+    parser.add_argument('--semeval_root', help="folder containing semeval data", default=DEFAULT_SEMEVAL_ROOT)
     args = parser.parse_args()
 
     with gzip.open(args.model) as f:

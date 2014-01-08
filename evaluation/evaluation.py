@@ -79,7 +79,7 @@ def run_model(embeddings, vocab_container,
                                                     vocab_container,
                                                     grefenstette_verb_file)
 
-    stats['semeval_correlation'], stats['semeval_accuracy'] \
+    stats['semeval_correlation'], stats['semeval_accuracy'], semeval_stats \
             = semeval.run(embeddings,
                           vocab_container,
                           semeval_root)

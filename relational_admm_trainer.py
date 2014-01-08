@@ -186,7 +186,7 @@ if __name__ == "__main__":
             semantic_args = {
                 'rng': rng,
                 'vocab_size': args['vocab_size'],
-                'n_rel': len(relationships.relationships),
+                'n_rel': relationships.N_relationships,
                 'dimensions': args['dimensions'],
                 'learning_rate': args['semantic_learning_rate'],
                 'mode': args['mode'],
@@ -298,7 +298,7 @@ if __name__ == "__main__":
             for block_num in xrange(args['semantic_blocks_to_run']):
                 # block_size = semantic_training.shape[0]
                 block_size = relationships.N
-                for i, (word_a, rel_index, word_b) in relationships.training_block():
+                for i, (word_a, rel_index, word_b) in enumerate(relationships.training_block()):
                 # for i in xrange(block_size):
                     if i % print_freq == 0:
                         sys.stdout.write('\r k %i: pair : %d / %d' % (model.k, i, block_size))

@@ -7,6 +7,7 @@ import gzip
 import cPickle
 import sys
 from query import get_vocab_container
+from nltk.corpus import wordnet as wn
 
 def make_testing_data(model, relationships=None, vocabulary=None, s2w=None, pct=0.98):
     if relationships is None:
@@ -38,19 +39,37 @@ def score_model(model, vocabulary, s2w, relationships, symbolic_testing_data):
     vocab_size = len(vocabulary)
     correct_synsets = []
     correct_indices = []
+
+    # compute scorable synsets
+    synsets_with_rep = filter(s2w.usable, wn.all_synsets())
     N = len(symbolic_testing_data)
+    embeddings = model.averaged_embeddings()
+    def embed_synset(syn):
+        return embeddings[s2w.words_by_synset[syn]].mean(axis=0)
     for datum_index, (s1, s2, rel) in enumerate(symbolic_testing_data):
+        if s1 not in synsets_with_rep or s2 not in synsets_with_rep:
+            print
+            print 'failed sanity check for %s, %s' % (s1, s2)
         sys.stdout.write('\r%d / %d' % (datum_index, N))
         sys.stdout.flush()
-        w1 = s2w.words_by_synset[s1][0] # get the index of the most common word in the synset (contained in the vocab)
-        rel_index = relationships.relationships.index(rel)
-        scores_for_row = []
-        correct_indices.append(s2w.words_by_synset[s2][0])
+
         correct_synsets.append(s2)
-        for w2 in xrange(vocab_size):
-            scores_for_row.append(model.v_trainer.score(w1, w2, rel_index))
+
+        s1_embedding = embed_synset(s1)
+
+        rel_index = relationships.relationships.index(rel)
+
+        scores_for_row = []
+
+        for i, trial_synset in enumerate(synsets_with_rep):
+            if trial_synset == s2:
+                correct_indices.append(i)
+            trial_embedding = embed_synset(trial_synset)
+            scores_for_row.append(model.v_trainer.score_embeddings(s1_embedding, trial_embedding, rel_index))
         scores.append(scores_for_row)
     print
+    return np.array(scores), correct_synsets, correct_indices
+    # todo return scores, correct, and synsets_with_rep
     return np.array(scores), correct_synsets, correct_indices
 
 def ranks(scores, correct_indices):

@@ -525,6 +525,7 @@ class TranslationalNN(Picklable, VectorEmbeddings):
     def _initialize(self):
         self.train = self._make_training()
         self.score = self._make_scoring()
+        self.score_embeddings = self._make_embedding_scoring()
 
     @property
     def embeddings(self):
@@ -567,12 +568,17 @@ class TranslationalNN(Picklable, VectorEmbeddings):
         """
         left_embedding = self.embedding_layer(left_entity_index)
         right_embedding = self.embedding_layer(right_entity_index)
-        rel_embedding = self.translation_layer(relationship_index)
 
+        score, rel_embedding = self.call_embeddings(left_embedding, right_embedding, relationship_index)
+        return score, [left_embedding, right_embedding], [rel_embedding]
+
+
+    def call_embeddings(self, left_embedding, right_embedding, relationship_index):
+        rel_embedding = self.translation_layer(relationship_index)
         composite = left_embedding + rel_embedding - right_embedding
         score = -1 * T.sqrt(T.sum(composite **2, -1))
 
-        return score, [left_embedding, right_embedding], [rel_embedding]
+        return score, rel_embedding
 
     def updates(self, cost, entity_index_list, entity_embedding_list, relationship_index_list, relationship_embedding_list):
         return self.embedding_layer.updates(cost, entity_index_list, entity_embedding_list)\
@@ -629,6 +635,13 @@ class TranslationalNN(Picklable, VectorEmbeddings):
         left, right, rel = map(self._index_variable, ['left_index', 'right_index', 'rel_index'])
         score, _, _ = self(left, right, rel)
         return theano.function(inputs=[left, right, rel], outputs=score, mode=self.mode)
+
+    def _make_embedding_scoring(self):
+        left_embedding = T.vector('left_embedding')
+        right_embedding = T.vector('left_embedding')
+        rel_index = self._index_variable('rel_index')
+        score, _ = self.call_embeddings(left_embedding, right_embedding, rel_index)
+        return theano.function(inputs=[left_embedding, right_embedding, rel_index], outputs=score, mode=self.mode)
 
 class NeuralTensorLayer(Picklable):
     def _shared_attrs(self):
@@ -720,6 +733,7 @@ class TensorNN(Picklable, VectorEmbeddings):
     def _initialize(self):
         self.train = self._make_training()
         self.score = self._make_scoring()
+        self.score_embeddings = self._make_embedding_scoring()
 
     def __init__(self, rng, vocab_size, n_rel, dimensions, n_hidden=None, other_params=None, learning_rate=0.01, mode='FAST_RUN', initial_embeddings=None, policy_class='SGD'):
         if other_params is None:
@@ -761,6 +775,11 @@ class TensorNN(Picklable, VectorEmbeddings):
         tensor_layer_output, W_embeddings, V_embeddings, b_embeddings = self.tensor_layer(left_embedding, right_embedding, relationship_index)
         score = self.output_layer(tensor_layer_output)
         return score, [left_embedding, right_embedding], W_embeddings, V_embeddings, b_embeddings
+
+    def call_embeddings(self, left_embedding, right_embedding, relationship_index):
+        tensor_layer_output, _, _, _ = self.tensor_layer(left_embedding, right_embedding, relationship_index)
+        score = self.output_layer(tensor_layer_output)
+        return score
 
     def updates(self, cost, entity_index_list, entity_embedding_list, relationship_index_list, W_list, V_list, b_list):
         return self.embedding_layer.updates(cost, entity_index_list, entity_embedding_list)\
@@ -816,6 +835,12 @@ class TensorNN(Picklable, VectorEmbeddings):
         score, _, _, _, _ = self(left, right, rel)
         return theano.function(inputs=[left, right, rel], outputs=score, mode=self.mode)
 
+    def _make_embedding_scoring(self):
+        left_embedding = T.vector('left_embedding')
+        right_embedding = T.vector('left_embedding')
+        rel_index = self._index_variable('rel_index')
+        score = self.call_embeddings(left_embedding, right_embedding, rel_index)
+        return theano.function(inputs=[left_embedding, right_embedding, rel_index], outputs=score, mode=self.mode)
 
 class ADMM(Picklable, VectorEmbeddings):
     def _admm_cost(self, side='w'):

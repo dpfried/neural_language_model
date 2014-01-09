@@ -8,6 +8,7 @@ import cPickle
 import sys
 from query import get_vocab_container
 from nltk.corpus import wordnet as wn
+import pandas
 
 def make_testing_data(model, relationships=None, vocabulary=None, s2w=None, pct=0.98):
     if relationships is None:
@@ -79,7 +80,36 @@ def score_socher_set(model, socher_set):
         embedding_1 = average_indices(indices_1)
         embedding_2 = average_indices(indices_2)
         return float(model.v_trainer.score_embeddings(embedding_1, embedding_2, rel_index))
-    return [list(row) + [score_row(row)] for row in socher_set]
+    data = [list(row) + [score_row(row)] for row in socher_set]
+    return pandas.DataFrame(data,columns=['indices_a', 'rel', 'indices_b', 'label', 'score'])
+
+def classify(rows, threshold):
+    return rows.score.map(lambda f: 1 if f >= threshold else -1)
+
+def num_correct(rows, threshold):
+    num_true_pos = (rows[rows.score >= threshold].label == 1).sum()
+    num_true_neg = (rows[rows.score < threshold].label == -1).sum()
+    return num_true_pos + num_true_neg
+
+def find_thresholds(scored_set):
+    thresholds = {}
+    for rel in set(scored_set.rel):
+        this_rel_data = scored_set[scored_set.rel == rel]
+        minv = this_rel_data.score.min()
+        maxv = this_rel_data.score.max()
+        val = max(np.arange(minv, maxv, 0.005), key = lambda f: num_correct(this_rel_data, f).sum())
+        thresholds[rel] = val
+    return thresholds
+
+def accuracy(scored_set, thresholds):
+    acc = {}
+    for rel in thresholds:
+        this_rel_data = scored_set[scored_set.rel == rel]
+        N = len(this_rel_data.score)
+        pred = classify(this_rel_data, thresholds[rel])
+        correct = (this_rel_data.label == pred).sum()
+        acc[rel] = float(correct) / N
+    return acc
 
 def ranks(scores, correct_indices):
     N, M = scores.shape

@@ -33,7 +33,7 @@ def make_testing_data(model, relationships=None, vocabulary=None, s2w=None, pct=
 
 def score_model(model, vocabulary, s2w, relationships, symbolic_testing_data):
     # replace model v embeddings with averaged embeddings
-    model.v_trainer.embedding_layer.embedding.set_value(model.averaged_embeddings())
+    # model.v_trainer.embedding_layer.embedding.set_value(model.averaged_embeddings())
 
     scores = []
     vocab_size = len(vocabulary)
@@ -43,9 +43,10 @@ def score_model(model, vocabulary, s2w, relationships, symbolic_testing_data):
     # compute scorable synsets
     synsets_with_rep = filter(s2w.usable, wn.all_synsets())
     N = len(symbolic_testing_data)
-    embeddings = model.averaged_embeddings()
+    word_embeddings = model.averaged_embeddings()
     def embed_synset(syn):
-        return embeddings[s2w.words_by_synset[syn]].mean(axis=0)
+        return word_embeddings[s2w.words_by_synset[syn]].mean(axis=0)
+    synset_embeddings = [embed_synset(syn) for syn in synsets_with_rep]
     for datum_index, (s1, s2, rel) in enumerate(symbolic_testing_data):
         if s1 not in synsets_with_rep or s2 not in synsets_with_rep:
             print
@@ -61,16 +62,24 @@ def score_model(model, vocabulary, s2w, relationships, symbolic_testing_data):
 
         scores_for_row = []
 
-        for i, trial_synset in enumerate(synsets_with_rep):
+        for i, (trial_synset, trial_embedding) in enumerate(zip(synsets_with_rep, synset_embeddings)):
             if trial_synset == s2:
                 correct_indices.append(i)
-            trial_embedding = embed_synset(trial_synset)
             scores_for_row.append(model.v_trainer.score_embeddings(s1_embedding, trial_embedding, rel_index))
         scores.append(scores_for_row)
     print
     return np.array(scores), correct_synsets, correct_indices
-    # todo return scores, correct, and synsets_with_rep
-    return np.array(scores), correct_synsets, correct_indices
+
+def score_socher_set(model, socher_set):
+    word_embeddings = model.averaged_embeddings()
+    def average_indices(indices):
+        return word_embeddings[ indices ].mean(axis=0)
+    def score_row(row):
+        indices_1, rel_index, indices_2 , label = row
+        embedding_1 = average_indices(indices_1)
+        embedding_2 = average_indices(indices_2)
+        return float(model.v_trainer.score_embeddings(embedding_1, embedding_2, rel_index))
+    return [list(row) + [score_row(row)] for row in socher_set]
 
 def ranks(scores, correct_indices):
     N, M = scores.shape

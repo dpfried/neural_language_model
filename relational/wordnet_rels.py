@@ -132,8 +132,6 @@ def resolve_synsets(lines, rel_map):
 class RelationshipsNTNDataset(object):
     def __init__(self, vocab, rng, dataset_path=DEFAULT_PATH):
         self.synsets = list(wn.all_synsets())
-        self.vocab = vocab
-        self.rng = rng
         self.train_raw = parse_lines(read_lines(train_path(dataset_path)))
         self.dev_raw = parse_lines(read_lines(dev_path(dataset_path)))
         self.test_raw = parse_lines(read_lines(test_path(dataset_path)))
@@ -145,6 +143,13 @@ class RelationshipsNTNDataset(object):
         self.syn_map = resolve_synsets(self.train_raw + self.dev_raw + self.test_raw,
                                        rel_map)
 
+        if vocab is None:
+            vocab = [lemma for fd in self.syn_map.values()
+                     for syn in fd
+                     for lemma in syn.lemma_names]
+
+        self.vocab = vocab
+        self.rng = rng
         self.synset_to_word = SynsetToWord(vocab)
 
         self.relations = list(rel_map.keys())

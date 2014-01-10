@@ -74,7 +74,7 @@ def score_model(model, vocabulary, s2w, relationships, symbolic_testing_data):
 def score_socher_set(model, socher_set):
     word_embeddings = model.averaged_embeddings()
     def average_indices(indices):
-        return word_embeddings[ indices ].mean(axis=0)
+        return np.nan_to_num(word_embeddings[ indices ].mean(axis=0))
     def score_row(row):
         indices_1, rel_index, indices_2 , label = row
         embedding_1 = average_indices(indices_1)

@@ -516,7 +516,8 @@ class TranslationalNN(Picklable, VectorEmbeddings):
                 'translation_layer',
                 'n_rel',
                 'dimensions',
-                'vocab_size']
+                'vocab_size',
+                'k']
 
     @property
     def components(self):
@@ -557,7 +558,8 @@ class TranslationalNN(Picklable, VectorEmbeddings):
                         translation_layer=translation_layer,
                         dimensions=dimensions,
                         n_rel=n_rel,
-                        vocab_size=vocab_size)
+                        vocab_size=vocab_size,
+                        k=0)
         self._initialize()
 
 
@@ -642,6 +644,9 @@ class TranslationalNN(Picklable, VectorEmbeddings):
         rel_index = self._index_variable('rel_index')
         score, _ = self.call_embeddings(left_embedding, right_embedding, rel_index)
         return theano.function(inputs=[left_embedding, right_embedding, rel_index], outputs=score, mode=self.mode)
+
+    def increase_k(self):
+        self.k += 1
 
 class NeuralTensorLayer(Picklable):
     def _shared_attrs(self):
@@ -728,7 +733,8 @@ class TensorNN(Picklable, VectorEmbeddings):
                 'output_layer',
                 'mode',
                 'vocab_size',
-                'other_params']
+                'other_params',
+                'k']
 
     def _initialize(self):
         self.train = self._make_training()
@@ -759,7 +765,10 @@ class TensorNN(Picklable, VectorEmbeddings):
                         other_params=other_params,
                         embedding_layer=embedding_layer,
                         tensor_layer=tensor_layer,
-                        output_layer=output_layer)
+                        output_layer=output_layer,
+                        k=0)
+
+        self._initialize()
 
     @property
     def embeddings(self):
@@ -841,6 +850,9 @@ class TensorNN(Picklable, VectorEmbeddings):
         rel_index = self._index_variable('rel_index')
         score = self.call_embeddings(left_embedding, right_embedding, rel_index)
         return theano.function(inputs=[left_embedding, right_embedding, rel_index], outputs=score, mode=self.mode)
+
+    def increase_k(self):
+        self.k += 1
 
 class ADMM(Picklable, VectorEmbeddings):
     def _admm_cost(self, side='w'):

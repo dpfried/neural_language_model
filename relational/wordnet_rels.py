@@ -144,9 +144,10 @@ class RelationshipsNTNDataset(object):
                                        rel_map)
 
         if vocab is None:
-            vocab = [lemma for fd in self.syn_map.values()
-                     for syn in fd
-                     for lemma in syn.lemma_names]
+            vocab = list(set(word.lower() for fd in self.syn_map.values()
+                             for syn in fd
+                             for lemma in syn.lemma_names
+                             for word in lemma.split('_')))
 
         self.vocab = vocab
         self.rng = rng

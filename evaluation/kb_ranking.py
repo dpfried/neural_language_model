@@ -71,15 +71,21 @@ def score_model(model, vocabulary, s2w, relationships, symbolic_testing_data):
     print
     return np.array(scores), correct_synsets, correct_indices
 
-def score_socher_set(model, socher_set):
-    word_embeddings = model.averaged_embeddings()
+def score_socher_set(model, socher_set, admm=True):
+    if admm:
+        word_embeddings = model.averaged_embeddings()
+        score_fn = model.v_trainer.score_embeddings
+    else:
+        word_embeddings = model.embeddings
+        score_fn = model.score_embeddings
     def average_indices(indices):
+        # return word_embeddings[indices][0]
         return np.nan_to_num(word_embeddings[ indices ].mean(axis=0))
     def score_row(row):
         indices_1, rel_index, indices_2 , label = row
         embedding_1 = average_indices(indices_1)
         embedding_2 = average_indices(indices_2)
-        return float(model.v_trainer.score_embeddings(embedding_1, embedding_2, rel_index))
+        return float(score_fn(embedding_1, embedding_2, rel_index))
     data = [list(row) + [score_row(row)] for row in socher_set]
     return pandas.DataFrame(data,columns=['indices_a', 'rel', 'indices_b', 'label', 'score'])
 
@@ -87,9 +93,8 @@ def classify(rows, threshold):
     return rows.score.map(lambda f: 1 if f >= threshold else -1)
 
 def num_correct(rows, threshold):
-    num_true_pos = (rows[rows.score >= threshold].label == 1).sum()
-    num_true_neg = (rows[rows.score < threshold].label == -1).sum()
-    return num_true_pos + num_true_neg
+    predicted = classify(rows, threshold)
+    return (rows.label == predicted).sum()
 
 def find_thresholds(scored_set):
     thresholds = {}
@@ -103,17 +108,25 @@ def find_thresholds(scored_set):
 
 def accuracy(scored_set, thresholds):
     acc = {}
+    total_correct = 0
+    total_N = 0
     for rel in thresholds:
         this_rel_data = scored_set[scored_set.rel == rel]
         N = len(this_rel_data.score)
-        pred = classify(this_rel_data, thresholds[rel])
-        correct = (this_rel_data.label == pred).sum()
+        total_N += N
+        correct = num_correct(this_rel_data, thresholds[rel])
+        total_correct += correct
         acc[rel] = float(correct) / N
-    return acc
+    return acc, float(total_correct) / total_N
 
 def ranks(scores, correct_indices):
     N, M = scores.shape
     return [M - np.where(np.argsort(scores[n]) == correct_indices[n])[0][0] for n in xrange(N)]
+
+def test_socher(model, rels):
+    admm = hasattr(model, 'v_trainer')
+    thresholds = find_thresholds(score_socher_set(model, rels.dev_words, admm=admm))
+    return accuracy(score_socher_set(model, rels.test_words,admm=admm), thresholds)
 
 def test(model):
     relationship_path = os.path.join(model.other_params['base_dir'], 'relationships.pkl.gz')

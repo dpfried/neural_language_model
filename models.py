@@ -781,14 +781,13 @@ class TensorNN(Picklable, VectorEmbeddings):
         """
         left_embedding = self.embedding_layer(left_entity_index)
         right_embedding = self.embedding_layer(right_entity_index)
-        tensor_layer_output, W_embeddings, V_embeddings, b_embeddings = self.tensor_layer(left_embedding, right_embedding, relationship_index)
-        score = self.output_layer(tensor_layer_output)
+        score, W_embeddings, V_embeddings, b_embeddings = self.call_embeddings(left_embedding, right_embedding)
         return score, [left_embedding, right_embedding], W_embeddings, V_embeddings, b_embeddings
 
     def call_embeddings(self, left_embedding, right_embedding, relationship_index):
-        tensor_layer_output, _, _, _ = self.tensor_layer(left_embedding, right_embedding, relationship_index)
+        tensor_layer_output, W_embeddings, V_embeddings, b_embeddings = self.tensor_layer(left_embedding, right_embedding, relationship_index)
         score = self.output_layer(tensor_layer_output)
-        return score
+        return score, W_embeddings, V_embeddings, b_embeddings
 
     def updates(self, cost, entity_index_list, entity_embedding_list, relationship_index_list, W_list, V_list, b_list):
         return self.embedding_layer.updates(cost, entity_index_list, entity_embedding_list)\
@@ -848,7 +847,7 @@ class TensorNN(Picklable, VectorEmbeddings):
         left_embedding = T.vector('left_embedding')
         right_embedding = T.vector('left_embedding')
         rel_index = self._index_variable('rel_index')
-        score = self.call_embeddings(left_embedding, right_embedding, rel_index)
+        score, _, _, _ = self.call_embeddings(left_embedding, right_embedding, rel_index)
         return theano.function(inputs=[left_embedding, right_embedding, rel_index], outputs=score, mode=self.mode)
 
     def increase_k(self):

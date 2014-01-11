@@ -5,6 +5,7 @@ import numpy as np
 import os
 
 from collections import defaultdict
+from vocab import Vocabulary, UNKNOWN_WORD
 
 import nltk
 
@@ -130,34 +131,49 @@ def resolve_synsets(lines, rel_map):
     return synset_map
 
 class RelationshipsNTNDataset(object):
-    def __init__(self, vocab, rng, dataset_path=DEFAULT_PATH):
-        self.synsets = list(wn.all_synsets())
+    def __init__(self, existing_vocab=None, rng=np.random, dataset_path=DEFAULT_PATH):
+        '''existing_vocab should have the UNKNOWN_WORD represented by position 0'''
+        self.rng = rng
+
+        # read in the data file
         self.train_raw = parse_lines(read_lines(train_path(dataset_path)))
         self.dev_raw = parse_lines(read_lines(dev_path(dataset_path)))
         self.test_raw = parse_lines(read_lines(test_path(dataset_path)))
 
+
+        # resolve relationships for use in resolving synsets
         rel_map = resolve_relationships(self.train_raw + self.dev_raw + self.test_raw)
 
         # maps tokens of the form __dog_1 to a FreqDist where keys are possible
         # synsets
         self.syn_map = resolve_synsets(self.train_raw + self.dev_raw + self.test_raw,
                                        rel_map)
+        print 'collecting synsets'
+        self.synsets = set(syn for fd in self.syn_map.values()
+                           for syn in fd)
 
-        if vocab is None:
-            vocab = list(set(word.lower() for fd in self.syn_map.values()
-                             for syn in fd
-                             for lemma in syn.lemma_names
-                             for word in lemma.split('_')))
 
-        self.vocab = vocab
-        self.rng = rng
-        self.synset_to_word = SynsetToWord(vocab)
+        print 'collecting words'
+        # figure out what words are in these synsets
+        synset_lemma_words = set(word for syn in self.synsets
+                                 for word in words_from_synset(syn))
+        if existing_vocab is None:
+            existing_vocab = [UNKNOWN_WORD]
+
+        print 'finding new words'
+        # what words in the synsets aren't already in the vocab?
+        new_words = synset_lemma_words - set(existing_vocab)
+        # don't forget about rare word, this should be 0 in existing vocab
+        print 'creating vocabulary'
+        self.vocabulary = Vocabulary(list(existing_vocab) + list(new_words))
+        print 'mapping synsets to words'
+        self.synset_to_word = SynsetToWord(self.vocabulary, self.synsets)
 
         self.relations = list(rel_map.keys())
 
         def words(synset_token):
-            return [word for synset in self.syn_map[synset_token]
-                    for word in self.synset_to_word.words_by_synset[synset]]
+            return list(set( word for synset in self.syn_map[synset_token]
+                    for word in self.synset_to_word.words_by_synset[synset] ))
         def relation(rel_token):
             return self.relations.index(rel_token)
 
@@ -168,8 +184,11 @@ class RelationshipsNTNDataset(object):
         # each is a list of
         # ([word indices in synset_a], rel_name, [words indices in synset b], label)
         # tuples
+        print 'making train set'
         self.train_words = make_words_set(self.train_raw)
+        print 'making dev set'
         self.dev_words = make_words_set(self.dev_raw)
+        print 'making test set'
         self.test_words = make_words_set(self.test_raw)
 
         self.N_relationships = len(self.relations)
@@ -194,7 +213,7 @@ class RelationshipsNTNDataset(object):
     def display_word_row(self, row):
         indices_a, rel_index, indices_b, label = row
         def lookup_words(indices):
-            return [self.synset_to_word.word_index_to_token[index] for index in indices]
+            return [self.vocabulary[index] for index in indices]
         return lookup_words(indices_a), self.relations[rel_index], lookup_words(indices_b), label
 
     def usable_row(self, row):
@@ -246,28 +265,38 @@ class Relationships(object):
         synsets participate in"""
         return mapcan(self.tuples_for_synset, synsets)
 
-class SynsetToWord(object):
-    def __init__(self, vocabulary):
-        ''' vocabulary : a list of words'''
-        self.word_index_to_token = vocabulary
-        self.word_token_to_index = dict((word, index)
-                                   for index, word in enumerate(vocabulary))
-        self.words_by_synset = dict(
-            (synset, [self.word_token_to_index[lemma.name] for lemma in synset.lemmas
-                      if lemma.name in self.word_token_to_index])
-            for synset in wn.all_synsets()
-        )
+def words_from_synset(synset):
+    return list(set(word.lower()
+                    for lemma_name in synset.lemma_names
+                    for word in lemma_name.split('_')))
 
-    def all_words_in_relations(self, rels):
-        """
-        rels: wordnet_rels.Relationships
-        """
-        words = set()
-        for row in rels.data:
-            syn_a, syn_b, rel = rels.indices_to_symbolic(row)
-            words.update(self.words_by_synset[syn_a])
-            words.update(self.words_by_synset[syn_b])
-        return words
+class SynsetToWord(object):
+    def __init__(self, vocabulary, synsets=None):
+        '''vocabulary: L{Vocabulary}'''
+        if synsets is None:
+            synsets = wn.all_synsets()
+        self.synsets = synsets
+        self.vocabulary = vocabulary
+        # self.word_index_to_token = vocabulary
+        # self.word_token_to_index = dict((word, index)
+        #                            for index, word in enumerate(vocabulary))
+        self.words_by_synset = {
+            synset: [self.vocabulary.symbol_to_index[word]
+                     for word in words_from_synset(synset)
+                     if word in self.vocabulary]
+            for synset in self.synsets
+        }
+
+    # def all_words_in_relations(self, rels):
+    #     """
+    #     rels: wordnet_rels.Relationships
+    #     """
+    #     words = set()
+    #     for row in rels.data:
+    #         syn_a, syn_b, rel = rels.indices_to_symbolic(row)
+    #         words.update(self.words_by_synset[syn_a])
+    #         words.update(self.words_by_synset[syn_b])
+    #     return words
 
     def usable(self, syn):
         return bool(self.words_by_synset[syn])
@@ -277,5 +306,5 @@ if __name__ == "__main__":
     import ngrams
     reader = ngrams.NgramReader('/cl/nldata/books_google_ngrams_eng/5grams_size3.hd5', vocab_size=50000)
     s2w = SynsetToWord(reader.word_array)
-    indices_in_relationships = s2w.all_words_in_relations(rels)
-    print '%d words in vocabulary covered by relationships (out of %d)' % (len(indices_in_relationships) , len(reader.word_array))
+    # indices_in_relationships = s3w.all_words_in_relations(rels)
+    # print '%d words in vocabulary covered by relationships (out of %d)' % (len(indices_in_relationships) , len(reader.word_array))

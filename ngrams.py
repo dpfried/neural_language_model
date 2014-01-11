@@ -4,7 +4,8 @@ import numpy as np
 from collections import defaultdict
 
 from utils import sample_cumulative_discrete_distribution
-UNKNOWN_WORD = '*UNKNOWN*'
+
+from vocab import UNKNOWN_WORD
 
 class NgramReader(object):
     def __init__(self, filename, ngram_length=5, vocab_size=None, train_proportion=0.95, test_proportion=None):

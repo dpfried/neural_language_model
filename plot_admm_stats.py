@@ -95,8 +95,8 @@ if __name__ == "__main__":
         ("Total loss (augmented)", lambda frame, _: frame.semantic_mean_augmented + frame.syntactic_mean_augmented, 'loss'),
         ("NLM loss", lambda frame, _: frame.syntactic_mean, 'loss'),
         ("WordNet loss", lambda frame, _: frame.semantic_mean, 'loss'),
-        # ("syntactic validation mean score", lambda frame, _: frame.syntactic_validation_mean_score),
-        # ("semantic validation mean jaccard", lambda frame, _: frame.semantic_validation_mean_jaccard),
+        ("syntactic validation mean score", lambda frame, _: frame.syntactic_validation_mean_score, 'syn_validation'),
+        ("relational accuracy", lambda frame, _: frame.relational_accuracy, 'relational accuracy'),
     ]:
         try:
             plt.figure()

@@ -131,8 +131,10 @@ def resolve_synsets(lines, rel_map):
     return synset_map
 
 class RelationshipsNTNDataset(object):
-    def __init__(self, existing_vocab=None, rng=np.random, dataset_path=DEFAULT_PATH):
+    def __init__(self, existing_vocab=None, rng=None, dataset_path=DEFAULT_PATH):
         '''existing_vocab should have the UNKNOWN_WORD represented by position 0'''
+        if rng is None:
+            rng = np.random.RandomState()
         self.rng = rng
 
         # read in the data file
@@ -146,16 +148,15 @@ class RelationshipsNTNDataset(object):
 
         # maps tokens of the form __dog_1 to a FreqDist where keys are possible
         # synsets
-        self.syn_map = resolve_synsets(self.train_raw + self.dev_raw + self.test_raw,
+        syn_map = resolve_synsets(self.train_raw + self.dev_raw + self.test_raw,
                                        rel_map)
         print 'collecting synsets'
-        self.synsets = set(syn for fd in self.syn_map.values()
+        synsets = set(syn for fd in syn_map.values()
                            for syn in fd)
-
 
         print 'collecting words'
         # figure out what words are in these synsets
-        synset_lemma_words = set(word for syn in self.synsets
+        synset_lemma_words = set(word for syn in synsets
                                  for word in words_from_synset(syn))
         if existing_vocab is None:
             existing_vocab = [UNKNOWN_WORD]
@@ -169,13 +170,13 @@ class RelationshipsNTNDataset(object):
         print 'creating vocabulary'
         self.vocabulary = Vocabulary(list(existing_vocab) + list(new_words))
         print 'mapping synsets to words'
-        self.synset_to_word = SynsetToWord(self.vocabulary, self.synsets)
+        synset_to_word = SynsetToWord(self.vocabulary, synsets)
 
         self.relations = list(rel_map.keys())
 
         def words(synset_token):
-            return list(set( word for synset in self.syn_map[synset_token]
-                    for word in self.synset_to_word.words_by_synset[synset] ))
+            return list(set( word for synset in syn_map[synset_token]
+                    for word in synset_to_word.words_by_synset[synset] ))
         def relation(rel_token):
             return self.relations.index(rel_token)
 
@@ -198,7 +199,8 @@ class RelationshipsNTNDataset(object):
         self.N_dev = len(self.dev_words)
         self.N_test = len(self.test_words)
 
-        self.indices_in_intersection = {self.vocabulary[i] for i in (existing_vocab_set & synset_lemma_words)}
+        self.indices_in_intersection = {self.vocabulary.symbol_to_index[i]
+                                        for i in (existing_vocab_set & synset_lemma_words)}
         # for indices_a, _, indices_b, _ in self.train_words:
         #     self.indices_in_intersection.update(indices_a)
         #     self.indices_in_intersection.update(indices_b)

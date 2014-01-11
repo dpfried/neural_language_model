@@ -1,7 +1,7 @@
 import models
 import os
 import ngrams
-from relational.synset_to_word import SynsetToWord
+from relational.wordnet_rels import SynsetToWord
 import numpy as np
 import gzip
 import cPickle

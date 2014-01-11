@@ -12,6 +12,7 @@ from utils import models_in_folder
 import random
 import theano
 from os.path import join
+from pprint import pprint
 # from relational.synset_to_word import Relationships, SynsetToWord
 from relational.wordnet_rels import RelationshipsNTNDataset
 from evaluation.kb_ranking import test_socher
@@ -69,7 +70,7 @@ if __name__ == "__main__":
     # parser.add_argument('--semantic_block_size', type=int, default=100000)
     # parser.add_argument('--sem_validation_num_nearest', type=int, default=50, help='when running semantic validation after each round, look at the intersection of top N words in wordnet and top N by embedding for a given test word')
     # parser.add_argument('--sem_validation_num_to_test', type=int, default=500, help='in semantic validation after each round, the number of test words to sample')
-    parser.add_argument('--semantic_blocks_to_run', type=int, default=3)
+    parser.add_argument('--semantic_blocks_to_run', type=int, default=1)
 
     args = vars(parser.parse_args())
 
@@ -380,7 +381,8 @@ if __name__ == "__main__":
             print 'validation:'
             relational_acc_breakdown, relational_acc = test_socher(model, relationships)
             print 'relational accuracy breakdown'
-            print relational_acc_breakdown
+            for key, value in relational_acc_breakdown.items():
+                print "%s: %0.4f" % (relationships.relations[key], value)
             print 'relational accuracy: %0.4f' % relational_acc
             stats_for_k['relational_accuracy'] = relational_acc
             stats_for_k['relational_accuracy_breakdown'] = relational_acc_breakdown

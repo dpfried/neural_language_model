@@ -787,7 +787,7 @@ class TensorNN(Picklable, VectorEmbeddings):
         """
         left_embedding = self.embedding_layer(left_entity_index)
         right_embedding = self.embedding_layer(right_entity_index)
-        score, W_embeddings, V_embeddings, b_embeddings = self.call_embeddings(left_embedding, right_embedding)
+        score, W_embeddings, V_embeddings, b_embeddings = self.call_embeddings(left_embedding, right_embedding, relationship_index)
         return score, [left_embedding, right_embedding], W_embeddings, V_embeddings, b_embeddings
 
     def call_embeddings(self, left_embedding, right_embedding, relationship_index):
@@ -928,7 +928,7 @@ class ADMM(Picklable, VectorEmbeddings):
     def _initialize(self):
         print 'w_loss_multiplier:', self.w_loss_multiplier
         v_loss_multiplier = 1 - self.w_loss_multiplier
-        print 'v_loss_multiplier:', self.v_loss_multiplier
+        print 'v_loss_multiplier:', v_loss_multiplier
         assert (0 <= self.w_loss_multiplier <= 1) and (0 <= v_loss_multiplier <= 1)
         self.update_w = self.w_trainer._make_training(cost_multiplier=self.w_loss_multiplier,cost_addition=self._admm_cost('w'))
         self.update_v = self.v_trainer._make_training(cost_multiplier=v_loss_multiplier,cost_addition=self._admm_cost('v'))

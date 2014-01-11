@@ -14,6 +14,7 @@ import theano
 from os.path import join
 # from relational.synset_to_word import Relationships, SynsetToWord
 from relational.wordnet_rels import RelationshipsNTNDataset
+from evaluation.kb_ranking import test_socher
 
 theano.config.exception_verbosity = 'high'
 
@@ -40,14 +41,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('base_dir', help="file to dump model and stats in")
     # params for both
-    parser.add_argument('--vocab_size', type=int, default=50000)
     parser.add_argument('--dimensions', type=int, default=50)
     parser.add_argument('--rho', type=float, default=0.1)
     parser.add_argument('--random_seed', type=int, default=1234)
     parser.add_argument('--save_model_frequency', type=int, default=10)
     parser.add_argument('--mode', default='FAST_RUN')
+    parser.add_argument('--w_loss_multiplier', type=float, default=0.5)
 
     # params for syntactic
+    parser.add_argument('--ngram_vocab_size', type=int, default=50000)
     parser.add_argument('--dont_run_syntactic', action='store_true')
     parser.add_argument('--existing_syntactic_model', help='use this existing trained model as the syntactic model')
     parser.add_argument('--syntactic_learning_rate', type=float, default=0.01)
@@ -63,11 +65,11 @@ if __name__ == "__main__":
     parser.add_argument('--model_class', type=str, default='TranslationalNN')
     parser.add_argument('--existing_semantic_model', help='use this existing trained model as the semantic model')
     parser.add_argument('--semantic_learning_rate', type=float, default=0.01)
-    parser.add_argument('--semantic_tensor_n_hidden', type=int, default=50)
+    parser.add_argument('--semantic_tensor_n_hidden', type=int, default=4)
     # parser.add_argument('--semantic_block_size', type=int, default=100000)
     # parser.add_argument('--sem_validation_num_nearest', type=int, default=50, help='when running semantic validation after each round, look at the intersection of top N words in wordnet and top N by embedding for a given test word')
     # parser.add_argument('--sem_validation_num_to_test', type=int, default=500, help='in semantic validation after each round, the number of test words to sample')
-    parser.add_argument('--semantic_blocks_to_run', type=int, default=1)
+    parser.add_argument('--semantic_blocks_to_run', type=int, default=3)
 
     args = vars(parser.parse_args())
 
@@ -109,9 +111,8 @@ if __name__ == "__main__":
 
 
     # set up syntactic
-    ngram_reader = NgramReader(args['ngram_filename'], vocab_size=args['vocab_size'], train_proportion=args['train_proportion'], test_proportion=args['test_proportion'])
+    ngram_reader = NgramReader(args['ngram_filename'], vocab_size=args['ngram_vocab_size'], train_proportion=args['train_proportion'], test_proportion=args['test_proportion'])
     testing_block = ngram_reader.testing_block()
-    vocabulary = ngram_reader.word_array
     print 'corpus contains %i ngrams' % (ngram_reader.number_of_ngrams)
 
     # set up semantic
@@ -120,17 +121,23 @@ if __name__ == "__main__":
     # semantic_testing = relationships.data[num_semantic_training:]
 
     relationship_path = join(base_dir, 'relationships.pkl.gz')
+    vocabulary_path = join(base_dir, 'vocabulary.pkl.gz')
     try:
         with gzip.open(relationship_path) as f:
             relationships = cPickle.load(f)
         print 'loaded relationships from %s' % relationship_path
     except:
         # relationships = Relationships()
-        relationships = RelationshipsNTNDataset(vocabulary, data_rng)
+        relationships = RelationshipsNTNDataset(ngram_reader.word_array, data_rng)
         print 'saving relationships to %s' % relationship_path
         with gzip.open(relationship_path, 'wb') as f:
             cPickle.dump(relationships, f)
+        print 'saving vocabulary to %s' % vocabulary_path
+        with gzip.open(vocabulary_path, 'wb') as f:
+            cPickle.dump(relationships.vocabulary, f)
 
+    vocabulary = relationships.vocabulary
+    vocab_size = len(vocabulary)
 
     # print 'constructing synset to word'
     # synset_to_words = SynsetToWord(vocabulary)
@@ -162,7 +169,7 @@ if __name__ == "__main__":
                     _syntactic_model = loaded_model
         else:
             _syntactic_model = SequenceScoringNN(rng=rng,
-                                                 vocab_size=args['vocab_size'],
+                                                 vocab_size=vocab_size,
                                                  dimensions=args['dimensions'],
                                                  sequence_length=args['sequence_length'],
                                                  n_hidden=args['n_hidden'],
@@ -185,7 +192,7 @@ if __name__ == "__main__":
             semantic_class = eval(args['model_class'])
             semantic_args = {
                 'rng': rng,
-                'vocab_size': args['vocab_size'],
+                'vocab_size': vocab_size,
                 'n_rel': relationships.N_relationships,
                 'dimensions': args['dimensions'],
                 'learning_rate': args['semantic_learning_rate'],
@@ -198,10 +205,11 @@ if __name__ == "__main__":
 
         model = ADMM(w_trainer=_syntactic_model,
                      v_trainer=_semantic_model,
-                     vocab_size=args['vocab_size'],
+                     vocab_size=vocab_size,
                      indices_in_intersection=list(indices_in_intersection),
                      dimensions=args['dimensions'],
                      rho=args['rho'],
+                     w_loss_multiplier=args['w_loss_multiplier'],
                      other_params=args,
                      mode=args['mode'])
 
@@ -230,8 +238,6 @@ if __name__ == "__main__":
         all_stats = pandas.load(stats_fname)
     except:
         all_stats = pandas.DataFrame()
-
-    vocab_size = args['vocab_size']
 
     while True:
         last_time = time.clock()
@@ -371,11 +377,13 @@ if __name__ == "__main__":
             print 'semantic std augmented cost \t%f' % stats_for_k['semantic_std_augmented']
 
             # semantic validation
-            # semantic_mean_jaccard = validate_semantic(model, args['sem_validation_num_to_test'], args['sem_validation_num_nearest'], word_similarity, validation_rng)
-            # stats_for_k['semantic_validation_mean_jaccard'] = semantic_mean_jaccard
-
-            # print 'validation:'
-            # print 'semantic mean jaccard \t%f' % semantic_mean_jaccard
+            print 'validation:'
+            relational_acc_breakdown, relational_acc = test_socher(model, relationships)
+            print 'relational accuracy breakdown'
+            print relational_acc_breakdown
+            print 'relational accuracy: %0.4f' % relational_acc
+            stats_for_k['relational_accuracy'] = relational_acc
+            stats_for_k['relational_accuracy_breakdown'] = relational_acc_breakdown
 
         if not args['dont_run_semantic'] and not args['dont_run_syntactic']:
             # lagrangian update

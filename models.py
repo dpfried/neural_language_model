@@ -355,16 +355,18 @@ class SimilarityNN(Picklable, VectorEmbeddings):
     def _index_variable(self, name='index'):
         return T.lscalar(name)
 
-    def _make_training(self, cost_addition=None, burn_in=False):
+    def _make_training(self, cost_multiplier=None, cost_addition=None, burn_in=False):
         index_a = self._index_variable('index_a')
         index_b = self._index_variable('index_b')
         similarity = T.scalar('true_similarity')
 
         cost, indices, embeddings = self.cost(index_a, index_b, similarity)
-        if cost_addition:
-            augmented_cost = cost + cost_addition(indices, embeddings)
+        if cost_multiplier:
+            augmented_cost = cost_multiplier * cost
         else:
             augmented_cost = cost
+        if cost_addition:
+            augmented_cost = augmented_cost + cost_addition(indices, embeddings)
 
         update_fn = self.burn_in_updates if burn_in else self.updates
         updates = update_fn(augmented_cost, indices, embeddings)
@@ -472,7 +474,7 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         return T.lscalars(*['%s_%d' % (basename, i)
                             for i in xrange(self.sequence_length)])
 
-    def _make_training(self, cost_addition=None, burn_in=False):
+    def _make_training(self, cost_multiplier=None, cost_addition=None, burn_in=False):
         """
         compile and return symbolic theano function for training (including update of embedding and weights),
         The compiled function will take two vectors of ints, each of length
@@ -483,10 +485,12 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         error_indices = self._index_variables('error')
 
         cost, indices, embeddings = self.cost(correct_indices, error_indices)
-        if cost_addition:
-            augmented_cost = cost + cost_addition(indices, embeddings)
+        if cost_multiplier:
+            augmented_cost = cost_multiplier * cost
         else:
             augmented_cost = cost
+        if cost_addition:
+            augmented_cost = augmented_cost + cost_addition(indices, embeddings)
 
         update_fn = self.burn_in_updates if burn_in else self.updates
         updates = update_fn(augmented_cost, indices, embeddings)
@@ -614,16 +618,18 @@ class TranslationalNN(Picklable, VectorEmbeddings):
     def _index_variable(self, name='index'):
         return T.lscalar(name)
 
-    def _make_training(self, cost_addition=None, burn_in=False):
+    def _make_training(self, cost_multiplier=None, cost_addition=None, burn_in=False):
         left_good, left_bad, right_good, right_bad, rel_good, rel_bad = map(self._index_variable, ['left_good', 'left_bad', 'right_good', 'right_bad', 'rel_good', 'rel_bad'])
 
         cost, entity_indices, entity_embeddings, rel_indices, rel_embeddings = self.cost(left_good, right_good, rel_good,
                                                                                          left_bad, right_bad, rel_bad)
 
-        if cost_addition:
-            augmented_cost = cost + cost_addition(entity_indices, entity_embeddings)
+        if cost_multiplier:
+            augmented_cost = cost_multiplier * cost
         else:
             augmented_cost = cost
+        if cost_addition:
+            augmented_cost = augmented_cost + cost_addition(entity_indices, entity_embeddings)
 
         update_fn = self.burn_in_updates if burn_in else self.updates
         updates = update_fn(cost, entity_indices, entity_embeddings, rel_indices, rel_embeddings)
@@ -818,7 +824,7 @@ class TensorNN(Picklable, VectorEmbeddings):
     def _index_variable(self, name='index'):
         return T.lscalar(name)
 
-    def _make_training(self, cost_addition=None):
+    def _make_training(self, cost_multiplier=None, cost_addition=None):
         left_good, left_bad, right_good, right_bad, rel_good, rel_bad = map(self._index_variable, ['left_good', 'left_bad', 'right_good', 'right_bad', 'rel_good', 'rel_bad'])
 
         cost_return = self.cost(left_good, right_good, rel_good,
@@ -826,10 +832,13 @@ class TensorNN(Picklable, VectorEmbeddings):
 
         cost, entity_indices, entity_embeddings, rel_indices, W_embeddings, V_embeddings, b_embeddings = cost_return
 
-        if cost_addition:
-            augmented_cost = cost + cost_addition(entity_indices, entity_embeddings)
+        if cost_multiplier:
+            augmented_cost = cost * cost_multiplier
         else:
             augmented_cost = cost
+
+        if cost_addition:
+            augmented_cost = augmented_cost + cost_addition(entity_indices, entity_embeddings)
 
         updates = self.updates(augmented_cost, entity_indices, entity_embeddings, rel_indices, W_embeddings, V_embeddings, b_embeddings)
 
@@ -887,13 +896,14 @@ class ADMM(Picklable, VectorEmbeddings):
                 'other_params',
                 'rho',
                 'mode',
+                'w_loss_multiplier',
                 'k']
 
     @property
     def components(self):
         return ['w_trainer', 'v_trainer']
 
-    def __init__(self, w_trainer, v_trainer, vocab_size, indices_in_intersection, dimensions, rho, other_params=None, mode='FAST_RUN'):
+    def __init__(self, w_trainer, v_trainer, vocab_size, indices_in_intersection, dimensions, rho, w_loss_multiplier, other_params=None, mode='FAST_RUN'):
         # the lagrangian
         y = np.zeros((vocab_size, dimensions), dtype=theano.config.floatX)
 
@@ -911,12 +921,17 @@ class ADMM(Picklable, VectorEmbeddings):
                         indices_in_intersection=list(indices_in_intersection),
                         mode=mode,
                         y=y,
+                        w_loss_multiplier=w_loss_multiplier,
                         k=0)
         self._initialize()
 
     def _initialize(self):
-        self.update_w = self.w_trainer._make_training(cost_addition=self._admm_cost('w'))
-        self.update_v = self.v_trainer._make_training(cost_addition=self._admm_cost('v'))
+        print 'w_loss_multiplier:', self.w_loss_multiplier
+        v_loss_multiplier = 1 - self.w_loss_multiplier
+        print 'v_loss_multiplier:', self.v_loss_multiplier
+        assert (0 <= self.w_loss_multiplier <= 1) and (0 <= v_loss_multiplier <= 1)
+        self.update_w = self.w_trainer._make_training(cost_multiplier=self.w_loss_multiplier,cost_addition=self._admm_cost('w'))
+        self.update_v = self.v_trainer._make_training(cost_multiplier=v_loss_multiplier,cost_addition=self._admm_cost('v'))
         self.update_y = self._make_y_update()
 
     def _make_y_update(self):

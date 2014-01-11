@@ -160,9 +160,11 @@ class RelationshipsNTNDataset(object):
         if existing_vocab is None:
             existing_vocab = [UNKNOWN_WORD]
 
+        existing_vocab_set = set(existing_vocab)
+
         print 'finding new words'
         # what words in the synsets aren't already in the vocab?
-        new_words = synset_lemma_words - set(existing_vocab)
+        new_words = synset_lemma_words - existing_vocab_set
         # don't forget about rare word, this should be 0 in existing vocab
         print 'creating vocabulary'
         self.vocabulary = Vocabulary(list(existing_vocab) + list(new_words))
@@ -196,10 +198,10 @@ class RelationshipsNTNDataset(object):
         self.N_dev = len(self.dev_words)
         self.N_test = len(self.test_words)
 
-        self.indices_in_intersection = set()
-        for indices_a, _, indices_b, _ in self.train_words:
-            self.indices_in_intersection.update(indices_a)
-            self.indices_in_intersection.update(indices_b)
+        self.indices_in_intersection = {self.vocabulary[i] for i in (existing_vocab_set & synset_lemma_words)}
+        # for indices_a, _, indices_b, _ in self.train_words:
+        #     self.indices_in_intersection.update(indices_a)
+        #     self.indices_in_intersection.update(indices_b)
 
     def training_block(self):
         for i in self.rng.permutation(self.N_train):

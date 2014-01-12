@@ -64,10 +64,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model_directories', nargs='+')
     parser.add_argument('--limit', type=int, default=0)
+    parser.add_argument('--only_print', action='store_true')
     args = parser.parse_args()
 
     stats = []
     params = []
+    common_prefix = os.path.commonprefix(args.model_directories)
+    def suffix(model_directory):
+        return os.path.relpath(model_directory, common_prefix)
     for model_dir in args.model_directories:
         try:
             _stats = pandas.read_pickle(os.path.join(model_dir, 'stats.pkl'))
@@ -79,6 +83,15 @@ if __name__ == "__main__":
             continue
         stats.append(_stats)
         params.append(_params)
+    if args.only_print:
+        for stats_frame, sfx in zip(stats, [suffix(d) for d in args.model_directories]):
+            print sfx
+            cols = ['semantic_mean']
+            print stats_frame[cols].head(20)
+            print stats_frame[cols].tail(20)
+
+        import sys
+        sys.exit(0)
 
     def total_loss(frame, params):
         if 'syntactic_weight' in params:
@@ -105,9 +118,6 @@ if __name__ == "__main__":
             plt.ylabel(ylbl)
             plt.subplots_adjust(bottom=0.2)
             # for printing the names of models
-            common_prefix = os.path.commonprefix(args.model_directories)
-            def suffix(model_directory):
-                return os.path.relpath(model_directory, common_prefix)
 
             plot_stats_function(fn, stats, params, [suffix(d) for d in args.model_directories], limit=args.limit)
         except Exception as e:

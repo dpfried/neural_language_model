@@ -26,7 +26,7 @@ if __name__ == "__main__":
     parser.add_argument('--random_seed', type=int, default=1234)
 
     # params for semantic
-    parser.add_argument('--model_class', type=str, default='TensorNN')
+    parser.add_argument('--model_class', type=str, default='TranslationalNN')
     parser.add_argument('--existing_semantic_model', help='use this existing trained model as the semantic model')
     parser.add_argument('--semantic_learning_rate', type=float, default=0.01)
     parser.add_argument('--semantic_tensor_n_hidden', type=int, default=50)
@@ -77,7 +77,7 @@ if __name__ == "__main__":
         with gzip.open(relationship_path, 'wb') as f:
             cPickle.dump(relationships, f)
 
-    vocabulary = relationships.vocab
+    vocabulary = relationships.vocabulary
 
     # print 'constructing synset to word'
     # synset_to_words = SynsetToWord(vocabulary)
@@ -155,10 +155,10 @@ if __name__ == "__main__":
                 # corrupt with some other part
                 if to_mod == 0:
                     while word_a_new == word_a:
-                        word_a_new = data_rng.choice(vocab_size)
+                        word_a_new = data_rng.choice(relationships.indices_of_words_in_synsets) # data_rng.choice(vocab_size)
                 elif to_mod == 1:
                     while word_b_new == word_b:
-                        word_b_new = data_rng.choice(vocab_size)
+                        word_b_new = data_rng.choice(relationships.indices_of_words_in_synsets) # data_rng.choice(vocab_size)
                 elif to_mod == 2:
                     while rel_index_new == rel_index:
                         # rel_index_new = data_rng.randint(N_relationships)

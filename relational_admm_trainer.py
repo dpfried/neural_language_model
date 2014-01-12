@@ -66,7 +66,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_class', type=str, default='TranslationalNN')
     parser.add_argument('--existing_semantic_model', help='use this existing trained model as the semantic model')
     parser.add_argument('--semantic_learning_rate', type=float, default=0.01)
-    parser.add_argument('--semantic_tensor_n_hidden', type=int, default=4)
+    parser.add_argument('--semantic_tensor_n_hidden', type=int, default=50)
     # parser.add_argument('--semantic_block_size', type=int, default=100000)
     # parser.add_argument('--sem_validation_num_nearest', type=int, default=50, help='when running semantic validation after each round, look at the intersection of top N words in wordnet and top N by embedding for a given test word')
     # parser.add_argument('--sem_validation_num_to_test', type=int, default=500, help='in semantic validation after each round, the number of test words to sample')
@@ -101,6 +101,8 @@ if __name__ == "__main__":
         # dump the params
         with open(os.path.join(args['base_dir'], 'params.json'), 'w') as f:
             json.dump(args, f)
+
+    print args
 
     # N_relationships = len(relationships.relationships)
     replacement_column_index = args['sequence_length'] / 2
@@ -336,11 +338,11 @@ if __name__ == "__main__":
 
                     # corrupt with some other part
                     if to_mod == 0:
-                        while word_a_new == word_a and word_a_new not in indices_in_intersection:
-                            word_a_new = sample_cumulative_discrete_distribution(ngram_reader.cumulative_word_frequencies, rng=data_rng)
+                        while word_a_new == word_a:
+                            word_a_new = data_rng.choice(relationships.indices_of_words_in_synsets)  #sample_cumulative_discrete_distribution(ngram_reader.cumulative_word_frequencies, rng=data_rng)
                     elif to_mod == 1:
-                        while word_b_new == word_b and word_a_new not in indices_in_intersection:
-                            word_b_new = sample_cumulative_discrete_distribution(ngram_reader.cumulative_word_frequencies, rng=data_rng)
+                        while word_b_new == word_b:
+                            word_b_new = data_rng.choice(relationships.indices_of_words_in_synsets)  #sample_cumulative_discrete_distribution(ngram_reader.cumulative_word_frequencies, rng=data_rng)
                     elif to_mod == 2:
                         while rel_index_new == rel_index:
                             # rel_index_new = data_rng.randint(N_relationships)

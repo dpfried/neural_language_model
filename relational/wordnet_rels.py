@@ -199,8 +199,11 @@ class RelationshipsNTNDataset(object):
         self.N_dev = len(self.dev_words)
         self.N_test = len(self.test_words)
 
-        self.indices_in_intersection = {self.vocabulary.symbol_to_index[i]
-                                        for i in (existing_vocab_set & synset_lemma_words)}
+        self.indices_in_intersection = list(sorted(self.vocabulary.symbol_to_index[i]
+                                                   for i in (existing_vocab_set & synset_lemma_words)))
+
+        self.indices_of_words_in_synsets = list(sorted(self.vocabulary.symbol_to_index[i]
+                                                       for i in synset_lemma_words))
         # for indices_a, _, indices_b, _ in self.train_words:
         #     self.indices_in_intersection.update(indices_a)
         #     self.indices_in_intersection.update(indices_b)

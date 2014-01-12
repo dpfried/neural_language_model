@@ -86,7 +86,7 @@ if __name__ == "__main__":
     if args.only_print:
         for stats_frame, sfx in zip(stats, [suffix(d) for d in args.model_directories]):
             print sfx
-            cols = ['semantic_mean']
+            cols = ['semantic_mean', 'relational_accuracy']
             print stats_frame[cols].head(20)
             print stats_frame[cols].tail(20)
 

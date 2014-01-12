@@ -12,6 +12,7 @@ import os
 from utils import models_in_folder, compose
 import random
 import theano
+from pprint import pprint
 
 theano.config.exception_verbosity = 'high'
 
@@ -53,11 +54,12 @@ if __name__ == "__main__":
     # params for both
     parser.add_argument('--vocab_size', type=int, default=50000)
     parser.add_argument('--dimensions', type=int, default=50)
-    parser.add_argument('--rho', type=float, default=0.1)
+    parser.add_argument('--rho', type=float, default=0.05)
     parser.add_argument('--random_seed', type=int, default=1234)
     parser.add_argument('--save_model_frequency', type=int, default=10)
     parser.add_argument('--mode', default='FAST_RUN')
     parser.add_argument('--vsgd', action='store_true')
+    parser.add_argument('--w_loss_multiplier', type=float, default=0.5)
 
     # params for syntactic
     parser.add_argument('--dont_run_syntactic', action='store_true')
@@ -113,6 +115,8 @@ if __name__ == "__main__":
         # dump the params
         with open(os.path.join(args['base_dir'], 'params.json'), 'w') as f:
             json.dump(args, f)
+
+    pprint(args)
 
 
     replacement_column_index = args['sequence_length'] / 2
@@ -190,6 +194,7 @@ if __name__ == "__main__":
                      indices_in_intersection=list(indices_in_intersection),
                      dimensions=args['dimensions'],
                      rho=args['rho'],
+                     w_loss_multiplier=args['w_loss_multiplier'],
                      other_params=args,
                      mode=args['mode'])
 

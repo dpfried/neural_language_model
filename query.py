@@ -2,13 +2,13 @@ import numpy as np
 from scipy.spatial.distance import cdist, cosine
 import ngrams
 
-DEFAULT_NGRAM_FILE='/cl/nldata/books_google_ngrams_eng/5grams_size3.hd5'
+from config import DEFAULT_NGRAM_FILENAME
 
 def get_vocab_container(model):
     try:
         ngram_filename = model.other_params['ngram_filename']
     except:
-        ngram_filename = DEFAULT_NGRAM_FILE
+        ngram_filename = DEFAULT_NGRAM_FILENAME
     try:
         vocab_size = model.other_params['vocab_size']
     except:

@@ -145,6 +145,8 @@ def run(embeddings, vocab_container,  semeval_root=DEFAULT_SEMEVAL_ROOT):
 
 
 if __name__ == "__main__":
+    import config
+    config.DYNAMIC['compile_on_load'] = False
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('model', help="model file to be used for semeval.py script")

@@ -17,8 +17,9 @@ def make_series(model_root_folder,
                 plot_interval=100,
                 limit=None,
                 no_new=False,
-                average_embeddings=False,
+                dont_average_embeddings=False,
                 **run_model_args):
+    average_embeddings = not dont_average_embeddings
     if average_embeddings:
         suffix = 'eval-averaged.pkl'
     else:
@@ -75,26 +76,47 @@ def run_model(embeddings, vocab_container,
               wordsim_root="/home/dfried/data/wordsim/combined.csv",
               **kwargs):
     stats = {}
-    stats['grefenstette_rho'], _ = grefenstette.run(embeddings,
-                                                    vocab_container,
-                                                    grefenstette_verb_file)
+    # stats['grefenstette_rho'], _ = grefenstette.run(embeddings,
+    #                                                 vocab_container,
+    #                                                 grefenstette_verb_file)
 
     stats['semeval_correlation'], stats['semeval_accuracy'], semeval_stats \
             = semeval.run(embeddings,
                           vocab_container,
                           semeval_root)
 
-    stats['wordsim_rho'], _ = wordsim.run(embeddings,
-                                          vocab_container,
-                                          wordsim_root)
+    # stats['wordsim_rho'], _ = wordsim.run(embeddings,
+    #                                       vocab_container,
+    #                                       wordsim_root)
 
     return stats
 
+DEFAULT_MODELS = {
+    'GD + NLM': '/cl/work/dfried/models/socher_dataset_1-12/gd/weight0.5/',
+    'GD + NLM (0.75)': '/cl/work/dfried/models/socher_dataset_1-12/gd/weight0.75/',
+    'GD + NLM (0.25)': '/cl/work/dfried/models/socher_dataset_1-12/gd/weight0.25/',
+    'NTN + NLM': '/cl/work/dfried/models/socher_dataset_1-12/ntn/weight0.5/',
+    'NTN + NLM (0.75)': '/cl/work/dfried/models/socher_dataset_1-12/ntn/weight0.75/',
+    'NTN + NLM (0.25)': '/cl/work/dfried/models/socher_dataset_1-12/ntn/weight0.25/',
+    'TransE + NLM': '/cl/work/dfried/models/socher_dataset_1-12/transe/weight0.5/',
+    'TransE + NLM (0.75)': '/cl/work/dfried/models/socher_dataset_1-12/transe/weight0.75/',
+    'TransE + NLM (0.25)': '/cl/work/dfried/models/socher_dataset_1-12/transe/weight0.25/',
+    'NLM': '/cl/work/dfried/models/adagrad/only_syntactic/no_adagrad/',
+    'GD': '/cl/work/dfried/models/adagrad/only_semantic/no_adagrad/',
+    'NTN': '/cl/work/dfried/models/socher_dataset_1-10/ntn/only_sem/',
+    'TransE': '/cl/work/dfried/models/socher_dataset_1-10/transe/only_sem/',
+    'NLM (TransE embeddings)': '/cl/work/dfried/models/socher_dataset_init/nlm_init_w_transe/',
+    'NLM (NTN embeddings)': '/cl/work/dfried/models/socher_dataset_init/nlm_init_w_ntn/',
+    'NLM (GD embeddings)': '/cl/work/dfried/models/socher_dataset_init/nlm_init_w_gd/',
+    'GD (NLM embeddings)': '/cl/work/dfried/models/socher_dataset_init/gd_init_w_nlm/',
+    'NTN (NLM embeddings)': '/cl/work/dfried/models/socher_dataset_init/ntn_init_w_nlm/',
+    'TransE (NLM embeddings)': '/cl/work/dfried/models/socher_dataset_init/transe_init_w_nlm/',
+}
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('model_directories', nargs='+')
+    parser.add_argument('model_directories', nargs='*')
     parser.add_argument('--plot_interval', type=int, default=100)
     parser.add_argument('--grefenstette_verb_file', default='/home/dfried/code/verb_disambiguation')
 
@@ -106,7 +128,7 @@ if __name__ == "__main__":
     parser.add_argument('--limit', type=int, default=None)
     parser.add_argument('--no_new', action='store_true')
     parser.add_argument('--save_graphs_base')
-    parser.add_argument('--average_embeddings', action='store_true')
+    parser.add_argument('--dont_average_embeddings', action='store_true')
     args = parser.parse_args()
 
     import config
@@ -114,43 +136,53 @@ if __name__ == "__main__":
     # compiled theano functions
     config.DYNAMIC['compile_on_load'] = False
 
+    model_directories = args.model_directories or map(lambda (p, q): q, sorted(DEFAULT_MODELS.items()))
+
+    print model_directories
     all_stats = dict((model_directory, make_series(model_directory,
                                                    **vars(args)))
-                     for model_directory in args.model_directories)
+                     for model_directory in model_directories)
 
     for name, s in all_stats.items():
         print name
         print s
 
     stat_params = {
-        'grefenstette_rho': {
-            'title': "Grefenstette",
-        },
+        # 'grefenstette_rho': {
+        #     'title': "Grefenstette",
+        # },
         'semeval_accuracy': {
             'title': "SemEval Accuracy",
         },
         'semeval_correlation': {
             'title': "SemEval Correlation",
         },
-        'wordsim_rho': {
-            'title': "WordSim",
-        },
+        # 'wordsim_rho': {
+        #     'title': "WordSim",
+        # },
     }
 
     ys = {
-        'grefenstette_rho': '$\\rho$',
+        # 'grefenstette_rho': '$\\rho$',
         'semeval_accuracy': 'accuracy',
         'semeval_correlation': '$\\rho$',
-        'wordsim_rho': '$\\rho$',
+        # 'wordsim_rho': '$\\rho$',
     }
 
     # for printing the names of models
-    common_prefix = os.path.commonprefix(args.model_directories)
+    common_prefix = os.path.commonprefix(model_directories)
     def suffix(model_directory):
         if common_prefix != model_directory:
             return os.path.relpath(model_directory, common_prefix)
         else:
             return model_directory
+
+    def paper_names(model_directory):
+        for name, dir_ in DEFAULT_MODELS.items():
+            if model_directory == dir_:
+                return name
+
+    relabel = paper_names
 
     stat_example = [s for s in all_stats.values() if len(s) != 0][0]
     import matplotlib.pyplot as plt
@@ -159,13 +191,13 @@ if __name__ == "__main__":
         plt.title(stat_name)
         print len(all_stats)
         styles = line_styles(len(all_stats))
-        for model_directory, style in zip(args.model_directories, styles):
+        for model_directory, style in zip(model_directories, styles):
             data = all_stats[model_directory]
             try:
                 to_plot = data[stat_name]
                 if args.limit:
                     to_plot = to_plot[to_plot.index <= args.limit]
-                to_plot.plot(label=suffix(model_directory), style=style, **stat_params[stat_name])
+                to_plot.plot(label=relabel(model_directory), style=style, **stat_params[stat_name])
                 plt.xlabel('training iterations')
                 plt.ylabel(ys[stat_name])
                 plt.subplots_adjust(bottom=0.15)

@@ -896,7 +896,7 @@ class ADMM(Picklable, VectorEmbeddings):
                 'other_params',
                 'rho',
                 'mode',
-                'w_loss_multiplier',
+                ('w_loss_multiplier', 0.5),
                 'k']
 
     @property

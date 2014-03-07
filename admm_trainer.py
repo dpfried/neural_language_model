@@ -61,9 +61,10 @@ if __name__ == "__main__":
     parser.add_argument('--vsgd', action='store_true')
     parser.add_argument('--w_loss_multiplier', type=float, default=0.5)
 
+    parser.add_argument('--existing_embedding_path', help="path to an existing ADMM model. Call averaged_embeddings() and use these to initialize both sides of this ADMM")
+
     # params for syntactic
     parser.add_argument('--dont_run_syntactic', action='store_true')
-    parser.add_argument('--existing_syntactic_model', help='use this existing trained model as the syntactic model')
     parser.add_argument('--syntactic_learning_rate', type=float, default=0.01)
     parser.add_argument('--train_proportion', type=float, default=0.95)
     parser.add_argument('--test_proportion', type=float, default=0.0005)
@@ -74,7 +75,6 @@ if __name__ == "__main__":
 
     # params for semantic
     parser.add_argument('--dont_run_semantic', action='store_true')
-    parser.add_argument('--existing_semantic_model', help='use this existing trained model as the semantic model')
     parser.add_argument('--semantic_learning_rate', type=float, default=0.01)
     parser.add_argument('--semantic_block_size', type=int, default=100000)
     parser.add_argument('--k_nearest', type=int, default=5)
@@ -145,48 +145,40 @@ if __name__ == "__main__":
     # construct the admm, possibly using some existing semantic or syntactic
     # model
     if not model_loaded:
+        existing_embeddings = None
+        if args['existing_embedding_path']:
+            with gzip.open(args['existing_embedding_path']) as f:
+                embedding_model = cPickle.load(f)
+                existing_embeddings = embedding_model.averaged_embeddings()
+                print "loading existing model from %s" % (args['existing_embedding_path'])
+
+                r, c = existing_embeddings.shape
+                d = args['vocab_size'] - r
+                if d > 0:
+                    print "padding existing embeddings from %d to %d" % (r, args['vocab_size'])
+                    existing_embeddings = np.lib.pad(existing_embeddings, ((0, d), (0,0)), 'constant', constant_values=d)
+                else:
+                    print "shrinking existing embeddings from %d to %d" % (r, args['vocab_size'])
+                    existing_embeddings = existing_embeddings[:args['vocab_size']]
+
         print 'constructing model...'
-        if args['existing_syntactic_model']:
-            # check to see if the model to load is itself an ADMM. if it is,
-            # pull out the syntactic model, otherwise treat it as its own
-            # syntactic model
-            with gzip.open(args['existing_syntactic_model'], 'rb') as f:
-                loaded_model = cPickle.load(f)
-                if issubclass(type(loaded_model), ADMM):
-                    print 'pulling syntactic from existing model'
-                    _syntactic_model = loaded_model.w_trainer
-                else:
-                    _syntactic_model = loaded_model
-        else:
-            _syntactic_model = SequenceScoringNN(rng=rng,
-                                                 vocab_size=args['vocab_size'],
-                                                 dimensions=args['dimensions'],
-                                                 sequence_length=args['sequence_length'],
-                                                 n_hidden=args['n_hidden'],
-                                                 learning_rate=args['syntactic_learning_rate'],
-                                                 mode=args['mode'],
-                                                 vsgd=args['vsgd'])
+        _syntactic_model = SequenceScoringNN(rng=rng,
+                                             vocab_size=args['vocab_size'],
+                                             dimensions=args['dimensions'],
+                                             sequence_length=args['sequence_length'],
+                                             n_hidden=args['n_hidden'],
+                                             learning_rate=args['syntactic_learning_rate'],
+                                             mode=args['mode'],
+                                             vsgd=args['vsgd'],
+                                             initial_embeddings=existing_embeddings)
 
-        if args['existing_semantic_model']:
-            # check to see if the model to load is itself an ADMM. if it is,
-            # pull out the semantic model, otherwise treat it as its own
-            # semantic model
-            with gzip.open(args['existing_semantic_model'], 'rb') as f:
-                loaded_model = cPickle.load(f)
-                if issubclass(type(loaded_model), ADMM):
-                    print 'pulling semantic from existing model'
-                    _semantic_model = loaded_model.v_trainer
-                else:
-                    _semantic_model = loaded_model
-        else:
-            _semantic_model = SimilarityNN(rng=rng,
-                                           vocab_size=args['vocab_size'],
-                                           dimensions=args['dimensions'],
-                                           learning_rate=args['semantic_learning_rate'],
-                                           mode=args['mode'],
-                                           vsgd=args['vsgd'])
-
-
+        _semantic_model = SimilarityNN(rng=rng,
+                                       vocab_size=args['vocab_size'],
+                                       dimensions=args['dimensions'],
+                                       learning_rate=args['semantic_learning_rate'],
+                                       mode=args['mode'],
+                                       vsgd=args['vsgd'],
+                                       initial_embeddings=existing_embeddings)
 
         model = ADMM(w_trainer=_syntactic_model,
                      v_trainer=_semantic_model,

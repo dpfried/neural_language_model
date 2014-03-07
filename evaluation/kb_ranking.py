@@ -102,7 +102,7 @@ def find_thresholds(scored_set):
         this_rel_data = scored_set[scored_set.rel == rel]
         minv = this_rel_data.score.min()
         maxv = this_rel_data.score.max()
-        val = max(np.arange(minv, maxv, 0.005), key = lambda f: num_correct(this_rel_data, f).sum())
+        val = max(np.arange(minv, maxv, (maxv - minv) / 1000), key = lambda f: num_correct(this_rel_data, f).sum())
         thresholds[rel] = val
     return thresholds
 
@@ -125,7 +125,11 @@ def ranks(scores, correct_indices):
 
 def test_socher(model, rels):
     admm = hasattr(model, 'v_trainer')
-    thresholds = find_thresholds(score_socher_set(model, rels.dev_words, admm=admm))
+    print 'scoring set'
+    scores = score_socher_set(model, rels.dev_words, admm=admm)
+    print 'calculating thresholds'
+    thresholds = find_thresholds(scores)
+    print 'calculating accuracy'
     return accuracy(score_socher_set(model, rels.test_words,admm=admm), thresholds)
 
 def test(model):

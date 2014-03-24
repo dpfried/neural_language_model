@@ -211,14 +211,14 @@ if __name__ == "__main__":
             print e
         if args.save_graphs_base:
             plt.savefig('%s_%s.pdf' % (args.save_graphs_base, stat_name), bbox_inches='tight')
-    plt.show()
+    # plt.show()
     max_index = max(reduce(lambda p, q: set(p).intersection(set(q)),
                            map(lambda s: s.index, all_stats.values())))
     if args.limit and max_index > args.limit:
         max_index = args.limit
     data = pandas.DataFrame({
-        path.split('/')[-1]: frame.ix[max_index]
-        for path, frame in all_stats.iteritems()
+        relabel(name): frame.ix[max_index]
+        for name, frame in all_stats.iteritems()
     })
     print 'evaluated at iteration %d:' % max_index
     print data.transpose().to_latex(float_format=lambda f: "%0.2f" % f)

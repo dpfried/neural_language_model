@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.spatial.distance import cdist, cosine
 import ngrams
+from os.path import join
+import gzip, cPickle
 
 from config import DEFAULT_NGRAM_FILENAME
 
@@ -14,6 +16,24 @@ def get_vocab_container(model):
     except:
         vocab_size = 50000
     return ngrams.NgramReader(ngram_filename, vocab_size=vocab_size)
+
+## TODO: dedup this
+def get_vocab(model):
+    try:
+        base_dir = model.other_params['base_dir']
+        vocabulary_path = join(base_dir, 'vocabulary.pkl.gz')
+        return load_model(vocabulary_path)
+    except:
+        try:
+            ngram_filename = model.other_params['ngram_filename']
+        except:
+            ngram_filename = DEFAULT_NGRAM_FILENAME
+        try:
+            vocab_size = model.other_params['vocab_size']
+        except:
+            vocab_size = 50000
+        return ngrams.NgramReader(ngram_filename, vocab_size=vocab_size)
+
 
 def cosine_similarity(a, b):
     return 1 - cosine(a, b)
@@ -49,3 +69,11 @@ def query(model, vocab_container, word, n=10):
 def averaged_query(model, vocab_container, word, n=10):
     embeddings = model.averaged_embeddings()
     return query_embeddings(embeddings, vocab_container, word, n=n)
+
+def get_model(path, number=1000):
+    with gzip.open(join(path, 'model-%s.pkl.gz' % number)) as f:
+        return cPickle.load(f)
+
+def get_rels(path):
+    with gzip.open(join(path, 'relationships.pkl.gz')) as f:
+        return cPickle.load(f)

@@ -1,38 +1,21 @@
-from utils import models_in_folder, load_model
+from utils import models_in_folder, load_model, map_dict
 from query import query
 from pprint import pprint
 import ngrams
 from os.path import join
 from config import DEFAULT_NGRAM_FILENAME
 
-def get_vocab(model):
-    try:
-        base_dir = model.other_params['base_dir']
-        vocabulary_path = join(base_dir, 'vocabulary.pkl.gz')
-        return load_model(vocabulary_path)
-    except:
-        try:
-            ngram_filename = model.other_params['ngram_filename']
-        except:
-            ngram_filename = DEFAULT_NGRAM_FILENAME
-        try:
-            vocab_size = model.other_params['vocab_size']
-        except:
-            vocab_size = 50000
-        return ngrams.NgramReader(ngram_filename, vocab_size=vocab_size)
-
-def map_dict_values(f, dict):
-    return {key:f(value) for (key, value) in dict.iteritems()}
+from query impmort get_vocab
 
 def make_comparison_function(model_directories, model_number=None):
-    model_paths = map_dict_values(models_in_folder, model_directories)
+    model_paths = map_dict(models_in_folder, model_directories)
     if model_number is None:
         model_number = max(reduce(lambda p, q: p.intersection(q), map(lambda d: set(d.keys()), model_paths.values())))
 
-    paths = map_dict_values(lambda d: (d[model_number] if d else None), model_paths)
-    models = map_dict_values(load_model, paths)
+    paths = map_dict(lambda d: (d[model_number] if d else None), model_paths)
+    models = map_dict(load_model, paths)
 
-    vocab_containers = map_dict_values(get_vocab, models)
+    vocab_containers = map_dict(get_vocab, models)
     # since we turned off compile on load...
     for v in vocab_containers.values():
         try:
@@ -46,7 +29,6 @@ def make_comparison_function(model_directories, model_number=None):
             pprint(query(model, vocab_containers[name], word, n = n))
             print
     return display_cluster, model_number
-
 
 
 if __name__ == "__main__":

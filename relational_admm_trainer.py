@@ -48,6 +48,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_model_frequency', type=int, default=10)
     parser.add_argument('--mode', default='FAST_RUN')
     parser.add_argument('--w_loss_multiplier', type=float, default=0.5)
+    parser.add_argument('--l2_penalty', type=float, default=None)
 
     parser.add_argument('--existing_embedding_path', help="path to an existing ADMM model. Call averaged_embeddings() and use these to initialize both sides of this ADMM")
 
@@ -185,7 +186,8 @@ if __name__ == "__main__":
                                              n_hidden=args['n_hidden'],
                                              learning_rate=args['syntactic_learning_rate'],
                                              mode=args['mode'],
-                                             initial_embeddings=existing_embeddings)
+                                             initial_embeddings=existing_embeddings,
+                                             l2_penalty=args['l2_penalty'])
 
         semantic_class = eval(args['model_class'])
         semantic_args = {
@@ -195,7 +197,8 @@ if __name__ == "__main__":
             'dimensions': args['dimensions'],
             'learning_rate': args['semantic_learning_rate'],
             'mode': args['mode'],
-            'initial_embeddings': existing_embeddings
+            'initial_embeddings': existing_embeddings,
+            'l2_penalty', args['l2_penalty']
         }
         if args['model_class'] == 'TensorNN':
             semantic_args['n_hidden'] = args['semantic_tensor_n_hidden']

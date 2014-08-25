@@ -60,6 +60,7 @@ if __name__ == "__main__":
     parser.add_argument('--mode', default='FAST_RUN')
     parser.add_argument('--vsgd', action='store_true')
     parser.add_argument('--w_loss_multiplier', type=float, default=0.5)
+    parser.add_argument('--l2_penalty', type=float, default=None)
 
     parser.add_argument('--existing_embedding_path', help="path to an existing ADMM model. Call averaged_embeddings() and use these to initialize both sides of this ADMM")
 
@@ -170,7 +171,8 @@ if __name__ == "__main__":
                                              learning_rate=args['syntactic_learning_rate'],
                                              mode=args['mode'],
                                              vsgd=args['vsgd'],
-                                             initial_embeddings=existing_embeddings)
+                                             initial_embeddings=existing_embeddings,
+                                             l2_penalty=args['l2_penalty'])
 
         _semantic_model = SimilarityNN(rng=rng,
                                        vocab_size=args['vocab_size'],
@@ -178,7 +180,8 @@ if __name__ == "__main__":
                                        learning_rate=args['semantic_learning_rate'],
                                        mode=args['mode'],
                                        vsgd=args['vsgd'],
-                                       initial_embeddings=existing_embeddings)
+                                       initial_embeddings=existing_embeddings,
+                                       l2_penalty=args['l2_penalty'])
 
         model = ADMM(w_trainer=_syntactic_model,
                      v_trainer=_semantic_model,

@@ -329,7 +329,9 @@ if __name__ == "__main__":
             stats_for_k['y_norm'] = y_norm
             print 'k: %d\tnorm(w - v) %f \t norm(y) %f' % (model.k, res_norm, y_norm)
 
-        print 'time: %f' % (time.clock() - last_time)
+        elapsed_time = time.clock() - last_time
+        print 'time: %f' % (elapsed_time)
+        stats_for_k['elapsed_time'] = elapsed_time
 
         # append the stats for this update to all stats
         all_stats = pandas.concat([all_stats, pandas.DataFrame(stats_for_k, index=[model.k])])

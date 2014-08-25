@@ -73,7 +73,9 @@ def score_model(model, vocabulary, s2w, relationships, symbolic_testing_data):
 
 def score_socher_set(model, socher_set, admm=True):
     if admm:
-        word_embeddings = model.averaged_embeddings()
+        # word_embeddings = model.averaged_embeddings()
+        # score_fn = model.v_trainer.score_embeddings
+        word_embeddings = model.v_trainer.embeddings
         score_fn = model.v_trainer.score_embeddings
     else:
         word_embeddings = model.embeddings

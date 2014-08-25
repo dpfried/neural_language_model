@@ -100,6 +100,10 @@ class EmbeddingLayer(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding.get_value()
 
+    def l2_squared(self, embedding_list):
+        embedded_sequence = T.concatenate(embedding_list)
+        return T.sum(embedded_sequence ** 2)
+
 class LinearScalarResponse(Picklable):
     def _nonshared_attrs(self):
         return ['n_in', 'learning_rate', ('policy_class', 'SGD')]
@@ -144,6 +148,9 @@ class LinearScalarResponse(Picklable):
     def afterburn(self):
         self.W_policy.afterburn()
         self.b_policy.afterburn()
+
+    def l2_squared(self):
+        return T.sum(self.W ** 2) + T.sum(self.b ** 2)
 
 class HiddenLayer(Picklable):
     def _nonshared_attrs(self):
@@ -230,6 +237,9 @@ class HiddenLayer(Picklable):
         self.W_policy.afterburn()
         self.b_policy.afterburn()
 
+    def l2_squared(self):
+        return T.sum(self.W ** 2) + T.sum(self.b **2)
+
 class ScaledBilinear(Picklable):
     def _nonshared_attrs(self):
         return [
@@ -271,6 +281,9 @@ class ScaledBilinear(Picklable):
         self.w_policy.afterburn()
         self.b_policy.afterburn()
 
+    def l2_squared(self):
+        return T.sum(self.w ** 2) + T.sum(self.b ** 2)
+
 class CosineSimilarity(ScaledBilinear):
     def __call__(self, x, y):
         cos_distance = T.sum(x * y, -1) / T.sqrt(T.sum(x * x, -1) * T.sum(y * y, -1))
@@ -289,7 +302,8 @@ class SimilarityNN(Picklable, VectorEmbeddings):
                 'similarity_layer',
                 'dimensions',
                 'vocab_size',
-                ('vsgd', False)]
+                ('vsgd', False),
+                ('l2_penalty', None)]
 
     def _initialize(self):
         self.train = self._make_training()
@@ -303,7 +317,7 @@ class SimilarityNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, vsgd=False, similarity_class=CosineSimilarity):
+    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, vsgd=False, similarity_class=CosineSimilarity, l2_penalty=None):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -325,7 +339,8 @@ class SimilarityNN(Picklable, VectorEmbeddings):
                         similarity_layer=similarity_layer,
                         dimensions=dimensions,
                         vocab_size=vocab_size,
-                        vsgd=vsgd)
+                        vsgd=vsgd,
+                        l2_penalty=l2_penalty)
         self._initialize()
 
 
@@ -350,6 +365,9 @@ class SimilarityNN(Picklable, VectorEmbeddings):
     def cost(self, index_a, index_b, true_similarity):
         score, embeddings = self(index_a, index_b)
         cost = (score - true_similarity) ** 2
+        if self.l2_penalty is not None:
+            l2_squared = (self.embedding_layer.l2_squared(embeddings) + self.similarity_layer.l2_squared())
+            cost += self.l2_penalty * l2_squared
         return cost, [index_a, index_b], embeddings
 
     def _index_variable(self, name='index'):
@@ -391,7 +409,8 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
                 'dimensions',
                 'sequence_length',
                 'vocab_size',
-                ('vsgd', False)]
+                ('vsgd', False),
+                ('l2_penalty', None)]
 
     @property
     def components(self):
@@ -405,7 +424,7 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, vsgd=False):
+    def __init__(self, rng, vocab_size,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, vsgd=False, l2_penalty=None):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -440,7 +459,8 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
                          dimensions=dimensions,
                          sequence_length=sequence_length,
                          vocab_size=vocab_size,
-                        vsgd=vsgd)
+                        vsgd=vsgd,
+                        l2_penalty=l2_penalty)
         self._initialize()
 
 
@@ -468,6 +488,9 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         correct_score, correct_embeddings = self(correct_index_list)
         error_score, error_embeddings = self(error_index_list)
         cost = T.clip(1 - correct_score + error_score, 0, np.inf)
+        if self.l2_penalty is not None:
+            l2_squared = self.embedding_layer.l2_squared(correct_embeddings) + self.embedding_layer.l2_squared(error_embeddings) + self.hidden_layer.l2_squared() + self.output_layer.l2_squared()
+            self.cost += l2_squared * self.l2_penalty
         return cost, correct_index_list + error_index_list, correct_embeddings + error_embeddings
 
     def _index_variables(self, basename='index'):
@@ -521,7 +544,8 @@ class TranslationalNN(Picklable, VectorEmbeddings):
                 'n_rel',
                 'dimensions',
                 'vocab_size',
-                'k']
+                'k',
+                ('l2_penalty', None)]
 
     @property
     def components(self):
@@ -536,7 +560,7 @@ class TranslationalNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size, n_rel, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, policy_class='SGD'):
+    def __init__(self, rng, vocab_size, n_rel, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, policy_class='SGD', l2_penalty=None):
         # initialize parameters
         if other_params is None:
             other_params = {}
@@ -563,7 +587,8 @@ class TranslationalNN(Picklable, VectorEmbeddings):
                         dimensions=dimensions,
                         n_rel=n_rel,
                         vocab_size=vocab_size,
-                        k=0)
+                        k=0,
+                        l2_penalty=l2_penalty)
         self._initialize()
 
 
@@ -611,6 +636,10 @@ class TranslationalNN(Picklable, VectorEmbeddings):
 
         entity_embeddings = good_entity_embeddings + bad_entity_embeddings
         rel_embeddings = good_rel_embeddings + bad_rel_embeddings
+
+        if l2_penalty is not None:
+            l2_squared = self.embedding_layer.l2_squared(entity_embeddings) + self.translation_layer.l2_squared(rel_embeddings)
+            cost += l2_squared * self.l2_penalty
 
         return cost, entity_indices, entity_embeddings, rel_indices, rel_embeddings
 
@@ -729,6 +758,9 @@ class NeuralTensorLayer(Picklable):
                 self.V_policy.updates_indexed(cost, relation_index_list, V_rel_list) +\
                 self.b_policy.updates_indexed(cost, relation_index_list, b_rel_list)
 
+    def l2_squared(self, W_rel_list, V_rel_list, b_rel_list):
+        return T.sum(T.concatenate(W_rel_list) ** 2) + T.sum(T.concatenate(V_rel_list) ** 2) + T.sum(T.concatenate(b_rel_list) ** 2)
+
 class TensorNN(Picklable, VectorEmbeddings):
     def _nonshared_attrs(self):
         return ['n_hidden',
@@ -740,14 +772,15 @@ class TensorNN(Picklable, VectorEmbeddings):
                 'mode',
                 'vocab_size',
                 'other_params',
-                'k']
+                'k',
+                ('l2_penalty', None)]
 
     def _initialize(self):
         self.train = self._make_training()
         self.score = self._make_scoring()
         self.score_embeddings = self._make_embedding_scoring()
 
-    def __init__(self, rng, vocab_size, n_rel, dimensions, n_hidden=None, other_params=None, learning_rate=0.01, mode='FAST_RUN', initial_embeddings=None, policy_class='SGD'):
+    def __init__(self, rng, vocab_size, n_rel, dimensions, n_hidden=None, other_params=None, learning_rate=0.01, mode='FAST_RUN', initial_embeddings=None, policy_class='SGD', l2_penalty=None):
         if other_params is None:
             other_params = {}
 
@@ -772,7 +805,8 @@ class TensorNN(Picklable, VectorEmbeddings):
                         embedding_layer=embedding_layer,
                         tensor_layer=tensor_layer,
                         output_layer=output_layer,
-                        k=0)
+                        k=0,
+                        l2_penalty=l2_penalty)
 
         self._initialize()
 
@@ -818,6 +852,10 @@ class TensorNN(Picklable, VectorEmbeddings):
         W_embeddings = good_W + bad_W
         V_embeddings = good_V + bad_V
         b_embeddings = good_b + bad_b
+
+        if l2_penalty is not None:
+            l2_squared = self.embedding_layer.l2_squared(entity_embeddings) + self.tensor_layer.l2_squared(W_embeddings, V_embeddings, b_embeddings) + self.output_layer.l2_squared()
+            self.cost += l2_squared * self.l2_penalty
 
         return cost, entity_indices, entity_embeddings, rel_indices, W_embeddings, V_embeddings, b_embeddings
 

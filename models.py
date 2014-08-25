@@ -490,7 +490,7 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
         cost = T.clip(1 - correct_score + error_score, 0, np.inf)
         if self.l2_penalty is not None:
             l2_squared = self.embedding_layer.l2_squared(correct_embeddings) + self.embedding_layer.l2_squared(error_embeddings) + self.hidden_layer.l2_squared() + self.output_layer.l2_squared()
-            self.cost += l2_squared * self.l2_penalty
+            cost += l2_squared * self.l2_penalty
         return cost, correct_index_list + error_index_list, correct_embeddings + error_embeddings
 
     def _index_variables(self, basename='index'):

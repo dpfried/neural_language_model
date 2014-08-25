@@ -263,10 +263,10 @@ if __name__ == "__main__":
             print 'training:'
             print 'syntactic mean cost \t%f' % stats_for_k['syntactic_mean']
             print 'syntactic std cost \t%f' % stats_for_k['syntactic_std']
-            stats_for_k['semantic_mean_augmented'] = np.mean(augmented_costs)
-            stats_for_k['semantic_std_augmented'] = np.std(augmented_costs)
-            print 'semantic mean augmented cost \t%f' % stats_for_k['semantic_mean_augmented']
-            print 'semantic std augmented cost \t%f' % stats_for_k['semantic_std_augmented']
+            stats_for_k['syntactic_mean_augmented'] = np.mean(augmented_costs)
+            stats_for_k['syntactic_std_augmented'] = np.std(augmented_costs)
+            print 'syntactic mean augmented cost \t%f' % stats_for_k['syntactic_mean_augmented']
+            print 'syntactic std augmented cost \t%f' % stats_for_k['syntactic_std_augmented']
 
             # syntactic validation
             syn_validation_mean, syn_validation_weighted_mean = validate_syntactic(model, testing_block, ngram_reader, validation_rng)

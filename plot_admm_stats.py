@@ -21,12 +21,15 @@ def plot_stats_function(function, statss, paramss, labels=None, output_file=None
             to_plot = function(stats, params)
             if limit:
                 to_plot = to_plot[:limit]
-            to_plot.plot(style=style, label=label)
+            # to_plot.plot(style=style, label=label)
+            ax = to_plot.plot(label=label, legend=False)
         except Exception as e:
             print e
-    plt.legend(loc='best').get_frame().set_alpha(0.6)
+    patches, labels = ax.get_legend_handles_labels()
+    # plt.legend(loc='best').get_frame().set_alpha(0.6)
     if output_file:
         plt.savefig(output_file, bbox_inches='tight')
+    plt.figure().legend(*ax.get_legend_handles_labels())
 
 def plot_loss_curves(stats_frame, limit=0):
     """take a single stats frame and plot the unaugmented syntactic, semantic, and combined loss"""
@@ -102,24 +105,24 @@ if __name__ == "__main__":
             sem_w = .5
         return syn_w * frame.syntactic_mean + sem_w * frame.semantic_mean
     for plot_tile, fn, ylbl in [
-        ("NLM loss + WordNet loss", total_loss, 'loss'),
+        # ("NLM loss + WordNet loss", total_loss, '$L_{LM} + L_{GD}$'),
         ("Mean $||\mathbf{y}_i||_2$", lambda frame, _: frame.y_norm, 'mean norm'),
         ("Mean $||\mathbf{w}_i - \mathbf{v}_i||_2$", lambda frame, _: frame.res_norm, 'mean norm'),
-        ("Total loss (augmented)", lambda frame, _: frame.semantic_mean_augmented + frame.syntactic_mean_augmented, 'loss'),
-        ("NLM loss", lambda frame, _: frame.syntactic_mean, 'loss'),
-        ("WordNet loss", lambda frame, _: frame.semantic_mean, 'loss'),
-        ("syntactic validation mean score", lambda frame, _: frame.syntactic_validation_mean_score, 'syn_validation'),
-        ("relational accuracy", lambda frame, _: frame.relational_accuracy, 'relational accuracy'),
+        # ("Total loss (augmented)", lambda frame, _: frame.semantic_mean_augmented + frame.syntactic_mean_augmented, 'loss'),
+        # ("NLM loss", lambda frame, _: frame.syntactic_mean, '$L_{LM}$'),
+        # ("WordNet loss", lambda frame, _: frame.semantic_mean, '$L_{GD}$'),
+        # ("syntactic validation mean score", lambda frame, _: frame.syntactic_validation_mean_score, 'syn_validation'),
+        # ("relational accuracy", lambda frame, _: frame.relational_accuracy, 'relational accuracy'),
     ]:
         try:
-            plt.figure()
+            ax = plt.figure()
             plt.title(plot_tile)
             plt.xlabel('training iterations')
             plt.ylabel(ylbl)
             plt.subplots_adjust(bottom=0.2)
             # for printing the names of models
-
             plot_stats_function(fn, stats, params, [suffix(d) for d in args.model_directories], limit=args.limit)
+            plt.figure().legend(*ax.get_legend_handles_labels())
         except Exception as e:
             print e
     plt.show()

@@ -111,6 +111,9 @@ DEFAULT_MODELS = {
     'GD (NLM embeddings)': '/cl/work/dfried/models/socher_dataset_init/gd_init_w_nlm/',
     'NTN (NLM embeddings)': '/cl/work/dfried/models/socher_dataset_init/ntn_init_w_nlm/',
     'TransE (NLM embeddings)': '/cl/work/dfried/models/socher_dataset_init/transe_init_w_nlm/',
+    'GD + NLM (\\rho=0.1)': '/cl/work/dfried/models/adagrad/no_init_0.01/no_adagrad/',
+    'GD + NLM (\\rho=0.05)': '/cl/work/dfried/models/adagrad/no_init_0.05/',
+    'GD + NLM (\\rho=0.005)': '/cl/work/dfried/models/adagrad/no_init_0.005/',
 }
 
 if __name__ == "__main__":
@@ -197,7 +200,8 @@ if __name__ == "__main__":
                 to_plot = data[stat_name]
                 if args.limit:
                     to_plot = to_plot[to_plot.index <= args.limit]
-                to_plot.plot(label=relabel(model_directory), style=style, **stat_params[stat_name])
+                # ax = to_plot.plot(label=relabel(model_directory), style=style, legend=False, **stat_params[stat_name])
+                ax = to_plot.plot(label=relabel(model_directory), legend=False, **stat_params[stat_name])
                 plt.xlabel('training iterations')
                 plt.ylabel(ys[stat_name])
                 plt.subplots_adjust(bottom=0.15)
@@ -206,12 +210,16 @@ if __name__ == "__main__":
                 print stat_name, model_directory
                 print e
         try:
-            plt.legend(loc='lower right').get_frame().set_alpha(0.6)
-        except Exception as e:
+            plt.figure().legend(*ax.get_legend_handles_labels())
+        except Exception as E:
             print e
+        # try:
+        #     plt.legend(loc='lower right').get_frame().set_alpha(0.6)
+        # except Exception as e:
+        #     print e
         if args.save_graphs_base:
             plt.savefig('%s_%s.pdf' % (args.save_graphs_base, stat_name), bbox_inches='tight')
-    # plt.show()
+    plt.show()
     max_index = max(reduce(lambda p, q: set(p).intersection(set(q)),
                            map(lambda s: s.index, all_stats.values())))
     if args.limit and max_index > args.limit:

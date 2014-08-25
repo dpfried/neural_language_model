@@ -92,13 +92,13 @@ def run_model(embeddings, vocab_container,
     return stats
 
 DEFAULT_MODELS = {
-    'GD + NLM': '/cl/work/dfried/models/socher_dataset_1-12/gd/weight0.5/',
+    'GD + NLM (0.5)': '/cl/work/dfried/models/socher_dataset_1-12/gd/weight0.5/',
     'GD + NLM (0.75)': '/cl/work/dfried/models/socher_dataset_1-12/gd/weight0.75/',
     'GD + NLM (0.25)': '/cl/work/dfried/models/socher_dataset_1-12/gd/weight0.25/',
-    'NTN + NLM': '/cl/work/dfried/models/socher_dataset_1-12/ntn/weight0.5/',
+    'NTN + NLM (0.5)': '/cl/work/dfried/models/socher_dataset_1-12/ntn/weight0.5/',
     'NTN + NLM (0.75)': '/cl/work/dfried/models/socher_dataset_1-12/ntn/weight0.75/',
     'NTN + NLM (0.25)': '/cl/work/dfried/models/socher_dataset_1-12/ntn/weight0.25/',
-    'TransE + NLM': '/cl/work/dfried/models/socher_dataset_1-12/transe/weight0.5/',
+    'TransE + NLM (0.5)': '/cl/work/dfried/models/socher_dataset_1-12/transe/weight0.5/',
     'TransE + NLM (0.75)': '/cl/work/dfried/models/socher_dataset_1-12/transe/weight0.75/',
     'TransE + NLM (0.25)': '/cl/work/dfried/models/socher_dataset_1-12/transe/weight0.25/',
     'NLM': '/cl/work/dfried/models/adagrad/only_syntactic/no_adagrad/',

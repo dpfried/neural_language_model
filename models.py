@@ -637,7 +637,7 @@ class TranslationalNN(Picklable, VectorEmbeddings):
         entity_embeddings = good_entity_embeddings + bad_entity_embeddings
         rel_embeddings = good_rel_embeddings + bad_rel_embeddings
 
-        if l2_penalty is not None:
+        if self.l2_penalty is not None:
             l2_squared = self.embedding_layer.l2_squared(entity_embeddings) + self.translation_layer.l2_squared(rel_embeddings)
             cost += l2_squared * self.l2_penalty
 

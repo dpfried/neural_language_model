@@ -853,9 +853,9 @@ class TensorNN(Picklable, VectorEmbeddings):
         V_embeddings = good_V + bad_V
         b_embeddings = good_b + bad_b
 
-        if l2_penalty is not None:
+        if self.l2_penalty is not None:
             l2_squared = self.embedding_layer.l2_squared(entity_embeddings) + self.tensor_layer.l2_squared(W_embeddings, V_embeddings, b_embeddings) + self.output_layer.l2_squared()
-            self.cost += l2_squared * self.l2_penalty
+            cost += l2_squared * self.l2_penalty
 
         return cost, entity_indices, entity_embeddings, rel_indices, W_embeddings, V_embeddings, b_embeddings
 

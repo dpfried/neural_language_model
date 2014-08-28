@@ -206,7 +206,7 @@ if __name__ == "__main__":
             'l2_penalty': args['l2_penalty']
         }
         if args['simple_joint']:
-            semantic_args['shared_embedding_layer'] = _syntactic_model.embeding_layer
+            semantic_args['shared_embedding_layer'] = _syntactic_model.embedding_layer
         if args['model_class'] == 'TensorNN':
             semantic_args['n_hidden'] = args['semantic_tensor_n_hidden']
 

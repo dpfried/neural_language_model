@@ -188,7 +188,7 @@ if __name__ == "__main__":
             'l2_penalty':args['l2_penalty']
         }
         if args['simple_joint']:
-            semantic_args['shared_embedding_layer'] = _syntactic_model.embeding_layer
+            semantic_args['shared_embedding_layer'] = _syntactic_model.embedding_layer
 
         _semantic_model = SimilarityNN(**semantic_args)
 
@@ -204,7 +204,7 @@ if __name__ == "__main__":
         }
 
         if args['simple_joint']:
-            model = Joint(**args)
+            model = Joint(**combined_args)
         else:
             combined_args['rho'] = args['rho']
             model = ADMM(**combined_args)

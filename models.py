@@ -317,18 +317,21 @@ class SimilarityNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, vsgd=False, similarity_class=CosineSimilarity, l2_penalty=None):
+    def __init__(self, rng, vocab_size, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, vsgd=False, similarity_class=CosineSimilarity, l2_penalty=None, shared_embedding_layer=None):
         # initialize parameters
         if other_params is None:
             other_params = {}
 
-        embedding_layer = EmbeddingLayer(rng,
-                                         vocab_size=vocab_size,
-                                         dimensions=dimensions,
-                                         initial_embeddings=initial_embeddings,
-                                         learning_rate=learning_rate,
-                                         policy_class='SGD',
-                                         )
+        if shared_embedding_layer is not None:
+            embedding_layer = shared_embedding_layer
+        else:
+            embedding_layer = EmbeddingLayer(rng,
+                                            vocab_size=vocab_size,
+                                            dimensions=dimensions,
+                                            initial_embeddings=initial_embeddings,
+                                            learning_rate=learning_rate,
+                                            policy_class='SGD',
+                                            )
 
         similarity_layer = similarity_class(learning_rate=learning_rate,
                                             policy_class='SGD')
@@ -424,18 +427,21 @@ class SequenceScoringNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, vsgd=False, l2_penalty=None):
+    def __init__(self, rng, vocab_size,  dimensions,  sequence_length, n_hidden, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, vsgd=False, l2_penalty=None, shared_embedding_layer=None):
         # initialize parameters
         if other_params is None:
             other_params = {}
         blocks_trained = 0
 
-        embedding_layer = EmbeddingLayer(rng,
-                                         vocab_size=vocab_size,
-                                         dimensions=dimensions,
-                                         initial_embeddings=initial_embeddings,
-                                         learning_rate=learning_rate,
-                                         policy_class='SGD')
+        if shared_embedding_layer is not None:
+            embeding_layer = shared_embedding_layer
+        else:
+            embedding_layer = EmbeddingLayer(rng,
+                                            vocab_size=vocab_size,
+                                            dimensions=dimensions,
+                                            initial_embeddings=initial_embeddings,
+                                            learning_rate=learning_rate,
+                                            policy_class='SGD')
 
         hidden_layer = HiddenLayer(rng=rng,
                                    n_in=dimensions * sequence_length,
@@ -560,17 +566,20 @@ class TranslationalNN(Picklable, VectorEmbeddings):
     def embeddings(self):
         return self.embedding_layer.embeddings
 
-    def __init__(self, rng, vocab_size, n_rel, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, policy_class='SGD', l2_penalty=None):
+    def __init__(self, rng, vocab_size, n_rel, dimensions, other_params=None, initial_embeddings=None, mode='FAST_RUN', learning_rate=0.01, policy_class='SGD', l2_penalty=None, shared_embedding_layer=None):
         # initialize parameters
         if other_params is None:
             other_params = {}
 
-        embedding_layer = EmbeddingLayer(rng,
-                                         vocab_size=vocab_size,
-                                         dimensions=dimensions,
-                                         initial_embeddings=initial_embeddings,
-                                         learning_rate=learning_rate,
-                                         policy_class=policy_class)
+        if shared_embedding_layer is not None:
+            embedding_layer = shared_embedding_layer
+        else:
+            embedding_layer = EmbeddingLayer(rng,
+                                            vocab_size=vocab_size,
+                                            dimensions=dimensions,
+                                            initial_embeddings=initial_embeddings,
+                                            learning_rate=learning_rate,
+                                            policy_class=policy_class)
 
         # represent each of n_rel relationships as a vector embedding to be
         # added to the embedding of the left entity in the relationship
@@ -780,16 +789,20 @@ class TensorNN(Picklable, VectorEmbeddings):
         self.score = self._make_scoring()
         self.score_embeddings = self._make_embedding_scoring()
 
-    def __init__(self, rng, vocab_size, n_rel, dimensions, n_hidden=None, other_params=None, learning_rate=0.01, mode='FAST_RUN', initial_embeddings=None, policy_class='SGD', l2_penalty=None):
+    def __init__(self, rng, vocab_size, n_rel, dimensions, n_hidden=None, other_params=None, learning_rate=0.01, mode='FAST_RUN', initial_embeddings=None, policy_class='SGD', l2_penalty=None, shared_embedding_layer = None):
         if other_params is None:
             other_params = {}
 
-        embedding_layer = EmbeddingLayer(rng,
-                                         vocab_size=vocab_size,
-                                         dimensions=dimensions,
-                                         learning_rate=learning_rate,
-                                         policy_class=policy_class,
-                                         initial_embeddings=initial_embeddings)
+        if shared_embedding_layer is not None:
+            # we want to share a single embedding layer between multiple models
+            embedding_layer = shared_embedding_layer
+        else:
+            embedding_layer = EmbeddingLayer(rng,
+                                             vocab_size=vocab_size,
+                                             dimensions=dimensions,
+                                             learning_rate=learning_rate,
+                                             policy_class=policy_class,
+                                             initial_embeddings=initial_embeddings)
 
         tensor_layer = NeuralTensorLayer(rng, n_rel, dimensions, n_hidden, learning_rate=learning_rate, policy_class=policy_class)
 
@@ -900,7 +913,84 @@ class TensorNN(Picklable, VectorEmbeddings):
     def increase_k(self):
         self.k += 1
 
+class Joint(Picklable, VectorEmbeddings):
+    '''
+    combine two networks that share a single set of embeddings into a joint model
+    '''
+
+    def _shared_attrs(self):
+        return ['intersection_indicator']
+
+    def _nonshared_attrs(self):
+        return ['w_trainer',
+                'v_trainer',
+                'indices_in_intersection',
+                'other_params',
+                'mode',
+                ('w_loss_multiplier', 0.5),
+                'k']
+
+    @property
+    def components(self):
+        return ['w_trainer', 'v_trainer']
+
+    def __init__(self, w_trainer, v_trainer, vocab_size, indices_in_intersection, dimensions, w_loss_multiplier, other_params=None, mode='FAST_RUN'):
+
+        intersection_indicator = np.zeros(vocab_size, dtype=np.int8)
+        intersection_indicator[list(indices_in_intersection)] = 1
+
+        if not other_params:
+            other_params = {}
+
+        self._set_attrs(w_trainer=w_trainer,
+                        v_trainer=v_trainer,
+                        other_params=other_params,
+                        intersection_indicator=intersection_indicator,
+                        indices_in_intersection=list(indices_in_intersection),
+                        mode=mode,
+                        w_loss_multiplier=w_loss_multiplier,
+                        k=0)
+        self._initialize()
+
+    def _initialize(self):
+        # the two halves should share a single set of embeddings. Check the
+        # EmbeddingLayer objects, not the embeddings property, which gets the
+        # matrix itself
+        assert self.w_trainer.embedding_layer == self.v_trainer.embedding_layer
+
+        print 'w_loss_multiplier:', self.w_loss_multiplier
+        v_loss_multiplier = 1 - self.w_loss_multiplier
+        print 'v_loss_multiplier:', v_loss_multiplier
+        assert (0 <= self.w_loss_multiplier <= 1) and (0 <= v_loss_multiplier <= 1)
+        self.update_w = self.w_trainer._make_training(cost_multiplier=self.w_loss_multiplier)
+        self.update_v = self.v_trainer._make_training(cost_multiplier=v_loss_multiplier)
+
+    @property
+    def include_syntactic(self):
+        return not ('dont_run_syntactic' in self.other_params and self.other_params['dont_run_syntactic'])
+
+    @property
+    def include_semantic(self):
+        return not ('dont_run_semantic' in self.other_params and self.other_params['dont_run_semantic'])
+
+    @property
+    def embeddings(self):
+        # assert the matrices are equal
+        assert self.w_trainer.embeddings == self.v_trainer.embeddings
+
+    def averaged_embeddings(self):
+        # this is just an alias so that we can duck type joint models as admm
+        # for the purpose of loading existing embeddings
+        return self.embeddings
+
+    def increase_k(self):
+        self.k += 1
+
 class ADMM(Picklable, VectorEmbeddings):
+    '''
+    combine two networks into a joint model, with their embeddings constrained using ADMM
+    '''
+
     def _admm_cost(self, side='w'):
         if side == 'w':
             other_model = self.v_trainer
@@ -1002,6 +1092,7 @@ class ADMM(Picklable, VectorEmbeddings):
 
     @property
     def embeddings(self):
+        return self.w_trainer.embeddings
         if self.include_syntactic and self.include_semantic:
             return np.concatenate((self.w_trainer.embeddings, self.v_trainer.embeddings), 1)
         elif self.include_syntactic:
@@ -1024,3 +1115,5 @@ class ADMM(Picklable, VectorEmbeddings):
 
     def increase_k(self):
         self.k += 1
+
+

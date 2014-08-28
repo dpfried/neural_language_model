@@ -1,7 +1,7 @@
 import time
 import json
 import pandas
-from models import SequenceScoringNN, ADMM, TensorNN, TranslationalNN
+from models import SequenceScoringNN, ADMM, TensorNN, TranslationalNN, Joint
 from ngrams import NgramReader
 import numpy as np
 from utils import sample_cumulative_discrete_distribution
@@ -49,6 +49,7 @@ if __name__ == "__main__":
     parser.add_argument('--mode', default='FAST_RUN')
     parser.add_argument('--w_loss_multiplier', type=float, default=0.5)
     parser.add_argument('--l2_penalty', type=float, default=None)
+    parser.add_argument('--simple_joint', action='store_true', help="do not use ADMM: share the embeddings of the models and have a simple additive loss")
 
     parser.add_argument('--existing_embedding_path', help="path to an existing ADMM model. Call averaged_embeddings() and use these to initialize both sides of this ADMM")
 
@@ -97,6 +98,10 @@ if __name__ == "__main__":
 
         model_loaded = True
         args = model.other_params
+        if 'vsgd' not in args: # backward compatibility
+            args['vsgd'] = False
+        if 'simple_joint' not in args: # backward compatibility
+            args['simple_joint'] = False
         # rewrite in case we've copied the model file into this folder
         args['base_dir'] = base_dir
     else:
@@ -200,20 +205,28 @@ if __name__ == "__main__":
             'initial_embeddings': existing_embeddings,
             'l2_penalty': args['l2_penalty']
         }
+        if args['simple_joint']:
+            semantic_args['shared_embedding_layer'] = _syntactic_model.embeding_layer
         if args['model_class'] == 'TensorNN':
             semantic_args['n_hidden'] = args['semantic_tensor_n_hidden']
 
         _semantic_model = semantic_class(**semantic_args)
 
-        model = ADMM(w_trainer=_syntactic_model,
-                     v_trainer=_semantic_model,
-                     vocab_size=vocab_size,
-                     indices_in_intersection=list(indices_in_intersection),
-                     dimensions=args['dimensions'],
-                     rho=args['rho'],
-                     w_loss_multiplier=args['w_loss_multiplier'],
-                     other_params=args,
-                     mode=args['mode'])
+        combined_args = {
+            'w_trainer':_syntactic_model,
+            'v_trainer':_semantic_model,
+            'vocab_size':vocab_size,
+            'indices_in_intersection':list(indices_in_intersection),
+            'dimensions':args['dimensions'],
+            'w_loss_multiplier':args['w_loss_multiplier'],
+            'other_params':args,
+            'mode':args['mode']
+        }
+        if args['simple_joint']:
+            model = Joint(**combined_args)
+        else:
+            combined_args['rho'] = args['rho']
+            model = ADMM(**combined_args)
 
     def save_model(filename=None):
         if filename is None:
@@ -388,7 +401,7 @@ if __name__ == "__main__":
             stats_for_k['relational_accuracy'] = relational_acc
             stats_for_k['relational_accuracy_breakdown'] = relational_acc_breakdown
 
-        if not args['dont_run_semantic'] and not args['dont_run_syntactic']:
+        if not args['dont_run_semantic'] and not args['dont_run_syntactic'] and not args['simple_joint']:
             # lagrangian update
             print 'updating y'
             res_norm, y_norm = model.update_y()

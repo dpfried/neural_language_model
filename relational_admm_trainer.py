@@ -45,10 +45,10 @@ if __name__ == "__main__":
     parser.add_argument('--dimensions', type=int, default=50)
     parser.add_argument('--rho', type=float, default=0.05)
     parser.add_argument('--random_seed', type=int, default=1234)
-    parser.add_argument('--save_model_frequency', type=int, default=10)
+    parser.add_argument('--save_model_frequency', type=int, default=25)
     parser.add_argument('--mode', default='FAST_RUN')
     parser.add_argument('--w_loss_multiplier', type=float, default=0.5)
-    parser.add_argument('--l2_penalty', type=float, default=None)
+    parser.add_argument('--l2_penalty', type=float, default=0.0001)
 
     parser.add_argument('--existing_embedding_path', help="path to an existing ADMM model. Call averaged_embeddings() and use these to initialize both sides of this ADMM")
 
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     # parser.add_argument('--semantic_block_size', type=int, default=100000)
     # parser.add_argument('--sem_validation_num_nearest', type=int, default=50, help='when running semantic validation after each round, look at the intersection of top N words in wordnet and top N by embedding for a given test word')
     # parser.add_argument('--sem_validation_num_to_test', type=int, default=500, help='in semantic validation after each round, the number of test words to sample')
-    parser.add_argument('--semantic_blocks_to_run', type=int, default=2)
+    parser.add_argument('--semantic_blocks_to_run', type=int, default=1)
 
     args = vars(parser.parse_args())
 

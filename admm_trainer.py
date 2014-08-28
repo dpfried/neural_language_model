@@ -56,11 +56,11 @@ if __name__ == "__main__":
     parser.add_argument('--dimensions', type=int, default=50)
     parser.add_argument('--rho', type=float, default=0.05)
     parser.add_argument('--random_seed', type=int, default=1234)
-    parser.add_argument('--save_model_frequency', type=int, default=10)
+    parser.add_argument('--save_model_frequency', type=int, default=25)
     parser.add_argument('--mode', default='FAST_RUN')
     parser.add_argument('--vsgd', action='store_true')
     parser.add_argument('--w_loss_multiplier', type=float, default=0.5)
-    parser.add_argument('--l2_penalty', type=float, default=None)
+    parser.add_argument('--l2_penalty', type=float, default=0.0001)
 
     parser.add_argument('--existing_embedding_path', help="path to an existing ADMM model. Call averaged_embeddings() and use these to initialize both sides of this ADMM")
 
